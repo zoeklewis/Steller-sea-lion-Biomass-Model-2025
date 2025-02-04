@@ -1,0 +1,2421 @@
+---
+title: "Consumption of Chinook salmon by Steller sea lions along the northwest coast of Washington"
+author: "Zoë Lewis and Benjamin Nelson"
+date: "2024-08-10"
+format: 
+  html: 
+    toc: true
+    toc-depth: 2
+    code-fold: true
+    number-sections: true
+    notebook: true
+    theme:
+      light: flatly
+      dark: darkly
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Description of Model
+
+Biomass of Chinook salmon consumed by Steller sea lions between December 2020-August 2021 along the northwest coast of Washington.
+
+First, we describe prey consumption models for Steller sea lions (SSL) adapted from @scordino2022. This model was developed to determine the biomass consumed by Steller sea lions between 2010-2013 along the northwest coast of Washington using hard parts identification of prey items within scat. Thus, we use many of the same parameters, however, abundance parameters changed based on updated counts of Steller sea lions in the region. Using this model, we first estimate the total biomass consumed by these Steller sea lions.
+
+Second, we used new DNA metabarcoding diet data to estimate the seasonal proportion of Chinook within Steller sea lion diet. Given that the data are zero-inflated, proportion data, we use ZOIB modeling (described in both the html and the rmd file titled "ZOIB model", as well as in @nelson2021a) to determine seasonal proportions of Chinook consumed .
+
+Third, we used the ZOIB modeling protocol to estimate the seasonal diet proportion of age-0 Chinook salmon consumed to determine the biomass and the number of age-0 Chinook salmon consumed by Steller sea lions along the northwest coast of Washington State. Then, we estimate the number of individual age-0 Chinook salmon consumed by Steller sea lions given previously used length distributions found in @chasco2017.
+
+## Required packages
+
+In this step, all necessary R packages are downloaded to produce the necessary outputs for the model.
+
+```{r Load packages, warning=FALSE, message=FALSE, output = FALSE}
+
+rm(list=ls()) 
+gc() 
+
+library(stringr)
+library(readxl)
+library(dplyr)
+library(colorspace)
+library(viridis)
+library(zoib)
+library(ggplot2)
+library(lemon)
+library(knitr)
+library(tidyr)
+library(patchwork)
+library(EnvStats)
+library(pander)
+library('scales')
+library(tibble)
+```
+
+# Steller sea lion consumption Model - Scordino et al. 2022
+
+There are three steps to calculate the total biomass of prey consumed by Steller sea lions along the coast of Washington state, similar to the steps taken in @scordino2022. 
+
+1)  Calculate individual Steller sea lion daily consumption
+
+2)  Model abundance and determine abundance functions
+
+3)  Calculate total biomass consumed using consumption and abundance
+
+## Individual Steller sea lion daily consumption 
+
+This section describes the distributions used to determine the daily consumption (in kilograms) of Steller sea lions based on their age, and sex. Parameters are derived from @winship2006; @winship2001, and the overall biomass model presented first in @scordino2022.
+
+### % body weight consumed
+
+Percent body weight consumed based on body weight estimates and sex are the same as those used in "Dietary niche overlap and prey consumption estimates for Steller sea lion and California sea lion in northwest Washington 2010-2013" @scordino2022. Percent body weight consumed determined using either normal distribution or uniform distributions.
+
+```{r percent body weight consumed} 
+
+#Female P 
+FLarge <- rnorm(1,0.05,0.01)
+FMed <- runif(1,0.06,0.07)
+FMedSm <- runif(1,0.07,0.08)
+FSmall <- runif(1,0.08,0.09)
+
+#Male P 
+MLarge <- runif(1,0.03,0.04)
+MMed <- rnorm(1,0.04,0.01)
+MMedSm <- runif(1,0.05,0.06)
+MSmall <- runif(1,0.06,0.07)
+MVSmall <- runif(1,0.08,0.09)
+```
+
+### Daily consumption 
+
+Functions used to determine the daily consumption of prey (kg/day) by SSL is defined in @scordino2022: "Formulas for estimating the daily consumption of a randomly drawn juvenile female juvenile male, adult female, and adult male using the consumption of body weight parameters defined above and the uniform distribution of reported weight at age for each age and sex class as reported in @winship2001. Juvenile weights are for sea lions ages 1 to 5. Juvenile females use non-pregnant 5 year old weight as the maximum weight for the category. Adults use age classes of 5 up to maximum growth from @winship2001."
+
+```{r individual daily consumption}
+
+## Individual daily consumption juvenile female (I)
+IndDailyConsumptionJuvF<- function() 
+{
+  JuvF <- runif(1,89,195)
+  if(JuvF > 194){JuvF*FMed}
+  if(JuvF > 152){JuvF*FMedSm}
+  if(JuvF > 89){JuvF*FSmall}
+}
+
+## Individual daily consumption adult female (I)
+IndDailyConsumptionAdF<- function() 
+{
+  AdFemale <- runif(1,195,305)
+  if(AdFemale > 223){AdFemale*FLarge}
+  if(AdFemale > 195){AdFemale*FMed}
+}
+
+## Individual daily consumption juvenile male (I)
+IndDailyConsumptionJuvM<- function() 
+{
+  JuvM <- runif(1,125,286)
+  if(JuvM > 182){JuvM*MSmall}
+  if(JuvM > 125){JuvM*MVSmall}
+}
+
+## Individual daily consumption adult male (I)
+IndDailyConsumptionAdM<- function() 
+{
+  AdMale <- runif(1,286,681)
+  if(AdMale > 623){AdMale*MLarge}
+  if(AdMale > 455){AdMale*MMed}
+  if(AdMale > 310){AdMale*MMedSm}
+  if(AdMale > 286) {AdMale*MSmall}
+}
+```
+
+
+## Modeling abundance
+
+Counts are from surveys conducted from 2020-2021 data counts only.
+
+Count data was only used from days that included all local haulouts surveyed. Raw data for the counts are available from Scordino and Akmajian 2021. Abundance functions were modeled using a negative binomial distribution.
+
+**Table 1**: Negative binomial parameters for modeling Steller sea lion abundance along the northwest coast of Washington State between December 2020-August 2021.
+
+| **Season** | **Mean** | **Size** | **n** |
+|:----------:|:--------:|:--------:|:-----:|
+|   Winter   |  976.33  |  36.34   |   3   |
+|   Spring   |  888.29  |  32.10   |   7   |
+|   Summer   |  969.77  |  25.80   |  13   |
+
+```{r abundance functions}
+# Winter Steller sea lion abundance
+WinAbund <- function()
+  {
+  rnbinom(n=1, mu=976.3333, size=36.34341)
+}
+
+# Spring Steller sea lion abundance
+SprAbund <- function()
+  {
+  rnbinom(n=1, mu=888.2857, size=32.07886)
+}
+
+# Summer Steller sea lion abundance
+SumAbund <- function()
+{
+  rnbinom(n=1, mu=969.7692, size=25.796)
+}
+```
+
+### Count correction factor functions
+
+Correction factors are the same as correction factors used in @scordino2022,
+
+Methods from @scordino2022 describe seasonal count correction factors as follows:
+
+"Correction factors from Olesiuk 2018 were used assuming that the correction factor for fall and spring have the same CF as caculated for winter. This assumption is supported by the findings of Whitlock et al. 2020 of very low attendance in May and by the end of August that were similar to Olesiuk's estimate for winter CF. Overall the correction factors from Olesiuk 2018 were similar to the estimates of Whitlock et al. 2020. These correction factors were for Steller sea lions. Olesiuk found that 36% of non-pups (SD=2.1%) were hauled out in fall, winter, and spring during the time window of 10:00 - 18:00 when our counts typically occurred. During summer Olesiuk found that 67.4% of non-pups (SD= 5.6%) were hauled out during survey time periods. Note that Olesiuk (2018) errored in reporting that 2.1% was the winter CV and 5.6% was the summer CV of the proportion of population hauled out; both should have read SD instead of CV (Personal communication Peter Olesiuk, 2021)."
+
+```{r correction factors}
+WinSprFallCF <- function()
+{
+  1/(rnorm(1,0.36,0.021))
+}
+
+
+SummerCF <- function()
+{
+  1/rnorm(1,0.674,0.056)
+  }
+```
+
+### Seasonal Demographic Functions (Sex and age)
+
+We assume that relative proportion of demographics has not changed from the initial estimates calculated for the model used in @scordino2022, as demographic counts were not performed for every survey in 2020-2021.
+
+Methods from @scordino2022:
+
+"Count data from Scordino and Akmajian (2021) were used to determine the proportion of the hauled out Steller sea lions that were adult male, adult female, and juvenile."
+
+Note: In contrast to abundance count data, demographic counts were obtained from all days 2010-2013 that had demographic data, and did not need to have all haulouts surveyed within a day.
+
+Seasonal demographic functions modeled with beta distributions for each season for observed adult female, adult male and juvenile proportions.
+
+**Table 2**: Beta distribution parameters for modeling demographic proportions for adult male, adult female and juvenile Steller sea lions along the northwest coast of Washington State. Demographic proportions obtained from @scordino2022, 2010-2013 demographic counts.
+
+| Season | Avg F | Sd F  | Avg J | Sd J  | Avg M | Sd M  | n   |
+|--------|:------|:------|:------|:------|:------|:------|:----|
+| Spring | 0.379 | 0.099 | 0.426 | 0.098 | 0.195 | 0.071 | 11  |
+| Summer | 0.261 | 0.055 | 0.408 | 0.055 | 0.330 | 0.071 | 9   |
+| Winter | 0.390 | 0.104 | 0.406 | 0.046 | 0.205 | 0.074 | 4   |
+
+The proportions of individuals hauled out of each demographic group is best modeled using a beta distribution. To calculate the beta distribution we first calculated the shape 1 and shape 2 of the distribution for each demographic group by season."
+
+```{r  distribution params}
+demographics <- list(
+  winter = list(
+    juvenile = c(mean = 0.406, sd = 0.046),
+    female = c(mean = 0.390, sd = 0.104),
+    male = c(mean = 0.205, sd = 0.074)
+  ),
+  spring = list(
+    juvenile = c(mean = 0.426, sd = 0.098),
+    female = c(mean = 0.379, sd = 0.099),
+    male = c(mean = 0.195, sd = 0.071)
+  ),
+  summer = list(
+    juvenile = c(mean = 0.408, sd = 0.055),
+    female = c(mean = 0.261, sd = 0.055),
+    male = c(mean = 0.330, sd = 0.071)
+  )
+)
+
+# Calculate beta shapes function
+calc_beta_shapes <- function(mean, sd) {
+  shape1 <- (mean^2 - mean^3 - mean * sd^2) / sd^2
+  shape2 <- (mean - 2 * mean^2 + mean^3 - sd^2 + mean * sd^2) / sd^2
+  return(c(shape1, shape2))
+}
+
+# General function to sample from Beta distribution for a given season and demographic
+sample_beta_demo <- function(season, demo_group) {
+  demo <- demographics[[season]][[demo_group]]
+  shapes <- calc_beta_shapes(demo["mean"], demo["sd"])
+  rbeta(n = 1, shape1 = shapes[1], shape2 = shapes[2])
+}
+```
+
+```{r demographic functions}
+WinJuvDemo <- function() sample_beta_demo("winter", "juvenile")
+WinFemDemo <- function() sample_beta_demo("winter", "female")
+WinMaleDemo <- function() sample_beta_demo("winter", "male")
+
+SprJuvDemo <- function() sample_beta_demo("spring", "juvenile")
+SprFemDemo <- function() sample_beta_demo("spring", "female")
+SprMaleDemo <- function() sample_beta_demo("spring", "male")
+
+SumJuvDemo <- function() sample_beta_demo("summer", "juvenile")
+SumFemDemo <- function() sample_beta_demo("summer", "female")
+SumMaleDemo <- function() sample_beta_demo("summer", "male")
+```
+
+### Sex of juveniles ratio
+
+Given that Steller sea lion juveniles are not observably different based on sex, we used a known ratio of juvenile female to juvenile male sea lions from previously described in @scordino2022.
+
+Sex ratios were determined from data from @wright2017, from cohorts 2001-2007, where survival rates occurred through year 5. Overall sex ratio of juveniles was then determined by averaging survivorship at age for ages 1-5 by each sex.
+
+The proportion of Juvenile sex are as follows:
+
+```{r juvenile sex ratios}
+PropJuvF <- 0.544
+PropJuvM <- 0.456
+```
+
+## Biomass calculation 
+
+Using the above parameters and functions, we can now model the total biomass consumed by Steller sea lions along the northwest Washington coast from December 2020- August 2021.
+
+### Biomass calculation function
+
+```{r biomass calculation function}
+calc_biomass <- function(abund_func, cf_func, demo_func, prop, ind_daily_cons_func) {
+  replicate(2000, 
+            abund_func() * cf_func() * demo_func() * prop * 90 * (ind_daily_cons_func())
+  )
+}
+
+# Quantile function for biomass
+get_biomass_quantiles <- function(biomass_data) {
+  quantile(biomass_data, probs = c(0.5, 0.025, 0.975, 0.25, 0.75))
+}
+```
+
+### Seasonal prey biomass consumed
+::: panel-tabset
+#### Winter
+
+```{r winter prey biomass, cache=TRUE}
+
+# Winter Biomass Calculations
+tot_biomass_WinterJuvF <- calc_biomass(WinAbund, WinSprFallCF, WinJuvDemo, PropJuvF, IndDailyConsumptionJuvF)
+tot_biomass_WinterJuvM <- calc_biomass(WinAbund, WinSprFallCF, WinJuvDemo, PropJuvM, IndDailyConsumptionJuvM)
+tot_biomass_WinterAdF  <- calc_biomass(WinAbund, WinSprFallCF, WinFemDemo, 1, IndDailyConsumptionAdF)
+tot_biomass_WinterAdM  <- calc_biomass(WinAbund, WinSprFallCF, WinMaleDemo, 1, IndDailyConsumptionAdM)
+
+# Get quantiles for each demographic
+Win.Juv.F_tot_biomass <- get_biomass_quantiles(tot_biomass_WinterJuvF)
+Win.Juv.M_tot_biomass <- get_biomass_quantiles(tot_biomass_WinterJuvM)
+Win.Ad.F_tot_biomass  <- get_biomass_quantiles(tot_biomass_WinterAdF)
+Win.Ad.M_tot_biomass  <- get_biomass_quantiles(tot_biomass_WinterAdM)
+
+# Combine quanitiles and format table for presentation in .html 
+win.biomass.demographic <- cbind(Win.Juv.F_tot_biomass,Win.Juv.M_tot_biomass,Win.Ad.F_tot_biomass, Win.Ad.M_tot_biomass)
+
+# Format table for presentation in .html 
+colnames(win.biomass.demographic) <- c("Juvenile Female", "Juvenile Male", "Adult Female", "Adult Male")
+
+kable(win.biomass.demographic, caption= "Winter biomass consumed by demographic (in kg)")
+
+# Total biomass for the entire population in metric tons
+Winter_tot_biomass <- (tot_biomass_WinterJuvF + tot_biomass_WinterJuvM + tot_biomass_WinterAdF + tot_biomass_WinterAdM) / 1000
+Winter_tot_biomass_sum <- get_biomass_quantiles(Winter_tot_biomass)
+
+kable(Winter_tot_biomass_sum, caption = "Total metric tons of prey consumed in winter")
+
+```
+
+#### Spring
+
+```{r spring prey biomass, cache=TRUE}
+# Spring Biomass Calculations
+tot_biomass_SpringJuvF <- calc_biomass(SprAbund, WinSprFallCF, SprJuvDemo, PropJuvF, IndDailyConsumptionJuvF)
+tot_biomass_SpringJuvM <- calc_biomass(SprAbund, WinSprFallCF, SprJuvDemo, PropJuvM, IndDailyConsumptionJuvM)
+tot_biomass_SpringAdF  <- calc_biomass(SprAbund, WinSprFallCF, SprFemDemo, 1, IndDailyConsumptionAdF)
+tot_biomass_SpringAdM  <- calc_biomass(SprAbund, WinSprFallCF, SprMaleDemo, 1, IndDailyConsumptionAdM)
+
+# Get quantiles for each demographic in Spring
+Spr.Juv.F_tot_biomass <- get_biomass_quantiles(tot_biomass_SpringJuvF)
+Spr.Juv.M_tot_biomass <- get_biomass_quantiles(tot_biomass_SpringJuvM)
+Spr.Ad.F_tot_biomass  <- get_biomass_quantiles(tot_biomass_SpringAdF)
+Spr.Ad.M_tot_biomass  <- get_biomass_quantiles(tot_biomass_SpringAdM)
+
+spr.biomass.demographic <- cbind(Spr.Juv.F_tot_biomass,Spr.Juv.M_tot_biomass,Spr.Ad.F_tot_biomass, Spr.Ad.M_tot_biomass)
+
+colnames(spr.biomass.demographic) <- c("Juvenile Female", "Juvenile Male", "Adult Female", "Adult Male")
+kable(spr.biomass.demographic, caption= "Spring biomass consumed by demographic (in kgs)")
+
+# Total biomass for the entire population in Spring (metric tons)
+Spring_tot_biomass <- (tot_biomass_SpringJuvF + tot_biomass_SpringJuvM + tot_biomass_SpringAdF + tot_biomass_SpringAdM) / 1000
+Spring_tot_biomass_sum <- get_biomass_quantiles(Spring_tot_biomass)
+
+kable(Spring_tot_biomass_sum, caption = "Total metric tons of prey consumed in spring")
+```
+
+#### Summer
+
+```{r summer prey biomass, cache=TRUE}
+# Summer Biomass Calculations
+tot_biomass_SummerJuvF <- calc_biomass(SumAbund, SummerCF, SumJuvDemo, PropJuvF, IndDailyConsumptionJuvF)
+tot_biomass_SummerJuvM <- calc_biomass(SumAbund, SummerCF, SumJuvDemo, PropJuvM, IndDailyConsumptionJuvM)
+tot_biomass_SummerAdF  <- calc_biomass(SumAbund, SummerCF, SumFemDemo, 1, IndDailyConsumptionAdF)
+tot_biomass_SummerAdM  <- calc_biomass(SumAbund, SummerCF, SumMaleDemo, 1, IndDailyConsumptionAdM)
+
+# Get quantiles for each demographic in Summer
+Sum.Juv.F_tot_biomass <- get_biomass_quantiles(tot_biomass_SummerJuvF)
+Sum.Juv.M_tot_biomass <- get_biomass_quantiles(tot_biomass_SummerJuvM)
+Sum.Ad.F_tot_biomass  <- get_biomass_quantiles(tot_biomass_SummerAdF)
+Sum.Ad.M_tot_biomass  <- get_biomass_quantiles(tot_biomass_SummerAdM)
+
+sum.biomass.demographic <- cbind(Sum.Juv.F_tot_biomass,Sum.Juv.M_tot_biomass,Sum.Ad.F_tot_biomass, Sum.Ad.M_tot_biomass)
+
+colnames(sum.biomass.demographic) <- c("Juvenile Female", "Juvenile Male", "Adult Female", "Adult Male")
+kable(sum.biomass.demographic, caption= "Summer biomass consumed by demographic (in kgs)")
+
+
+# Total biomass for the entire population in Summer (metric tons)
+Summer_tot_biomass <- (tot_biomass_SummerJuvF + tot_biomass_SummerJuvM + tot_biomass_SummerAdF + tot_biomass_SummerAdM) / 1000
+Summer_tot_biomass_sum <- get_biomass_quantiles(Summer_tot_biomass)
+
+kable(Summer_tot_biomass_sum, caption = "Total metric tons of prey consumed in summer")
+```
+:::
+
+## **Results: Total biomass (metric tons) consumed**
+
+```{r overall biomass calc, cache=TRUE}
+total_biomass <- (Summer_tot_biomass + Spring_tot_biomass + Winter_tot_biomass)
+overall_biomass_consumed <- as.data.frame(quantile(total_biomass,probs = c(0.5, 0.025, 0.975, 0.25,0.75)))
+
+colnames(overall_biomass_consumed) <- c("Prey consumed (metric tons)")
+
+overall_biomass_consumed <- apply(overall_biomass_consumed, 2, function(x) formatC(x, format = "f", big.mark = ",", digits = 1))
+
+kable(overall_biomass_consumed, caption = "Metric tons of prey consumed December-August")
+
+total_biomass_seasonal_avg_dat <- cbind(Winter_tot_biomass_sum, Spring_tot_biomass_sum, Summer_tot_biomass_sum) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  pivot_longer(cols = -rowname, names_to = "season", values_to = "value") %>%
+  pivot_wider(names_from = rowname, values_from = value)
+
+fig4dat <- total_biomass_seasonal_avg_dat %>%
+  mutate(
+    avg = `50%`,
+    ci_min = `2.5%`,
+    ci_max = `97.5%`,
+    ci_low = `25%`,
+    ci_high = `75%`,
+    season = factor(season, levels = c('Winter_tot_biomass_sum', 'Spring_tot_biomass_sum', 'Summer_tot_biomass_sum'),
+                    labels = c('Winter', 'Spring', 'Summer')))
+
+total_biomass_seasonal_avg_dat_formatted <- total_biomass_seasonal_avg_dat %>%
+  mutate_all(~ formatC(., format = "f", big.mark = ",", digits = 1))
+
+kable(total_biomass_seasonal_avg_dat_formatted, caption = "Biomass (in metric tons) consumed by season")
+```
+
+### Figure 4: Total Biomass Consumed
+```{r reformatting for figure, cache=TRUE}
+# Rename columns and factor the seasons
+seasonorder <- c('Winter', 'Spring', 'Summer')
+
+fig4plot <- ggplot(data=fig4dat, aes(x=factor(season, level= seasonorder), y=avg))+
+  geom_bar(stat="identity", fill = "grey", size = 0.5,color = "black")+
+  geom_errorbar(data=fig4dat, aes(ymin = ci_min, ymax = ci_max), width =0.1)+
+  geom_errorbar(data=fig4dat, aes(ymin = ci_low, ymax = ci_high), width =0.0, 
+                linewidth = 6, col = "#E2A43B")+ 
+  theme_light()  + 
+  theme(text=element_text(size=12)) + 
+  xlab('Season') + 
+  ylab('Total Biomass of Prey Consumed (metric tons)')
+
+fig4plot
+
+ggsave("Figures/Figure4.pdf", fig4plot, device = "pdf", units = c("in"), width = 6, height = 4, dpi = 300)
+
+```
+
+
+# ZOIB model for Chinook Diet Proportions
+
+## Data setup 
+```{r data set up for ZOIB, cache=TRUE}
+set.seed(99)
+
+RRAdat <- read_xlsx("model inputs.xlsx", sheet = "Chinook RRA")
+RRAdat$PRCNT <- RRAdat$RRA
+
+chinook <- RRAdat %>% select(sample, PRCNT) 
+
+metadata <- read_xlsx("model inputs.xlsx", sheet = "metadata")
+
+model_df <- merge(chinook, metadata, all = TRUE, by.x = "sample") %>% replace_na(list(PRCNT=0))
+
+model_df$species <- "ONCTSH"
+
+## Define useful variables
+n_samples<- length(unique(model_df$sample)) # Number of samples in the datset
+sample_list<- unique(model_df$sample) # List of sample IDs in dataset
+target_spp <- "ONCTSH"
+
+## Build the structure of the model df
+model_df$sample<- as.factor(model_df$sample)
+model_df$site<- as.factor(model_df$site)
+model_df$season<- as.factor(model_df$season)
+```
+
+## Plot of sample diet proportions, by season and sex
+
+```{r chinook raw data plots, cache=TRUE}
+plot_col<- viridis(5)# Colors
+site_cols<- c("Tatoosh Cut"=plot_col[1], "Sea Lion Rock"=plot_col[3])
+site_cols_fill<- c("Tatoosh Cut"=alpha(plot_col[1], 0.25), "Sea Lion Rock"=alpha(plot_col[3], 0.25))
+
+# Labels
+site_labs<- c("Tatoosh Cut"="Tatoosh Cut", "Sea Lion Rock"="Sea Lion Rock") 
+season_labs<- c("winter"="Winter", "spring"="Spring", "summer"="Summer")
+season_labels_alt<- c("W", "Spr", "Sum")
+
+# Build plot
+prop_plot1<- 
+  ggplot(model_df, aes(x=season, y=PRCNT, fill = site, color = site)) + 
+  geom_jitter(alpha=0.25, shape=16, width = 0.25) +  
+  geom_violin(aes(), trim = TRUE, scale = "area") +
+  labs(x="Month", y="Diet proportion") +
+   scale_x_discrete(labels = season_labs) +  
+  scale_fill_manual(values=site_cols_fill) + 
+  scale_color_manual(values=site_cols) + 
+  theme_bw() +
+  ggtitle("Sample derived Chinook diet proportions") + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.text.x = element_text(size=12, color="black",                               face="bold"), strip.text.y = element_text(size=12, color="black", face="bold"), legend.position = c(0.8, 0.8), 
+        axis.title.x = element_text(face="bold", size=14, hjust = 0.5, vjust = 0.00),
+        axis.title.y = element_text(face="bold", size=14, hjust = 0.5, vjust = 2.50),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        panel.spacing = unit(1.15, "lines")) + guides(fill = guide_legend(title = NULL), color = guide_legend(title = NULL))
+
+
+prop_plot2 <- ggplot(model_df, aes(x = season, y = PRCNT)) + 
+  geom_jitter(alpha = 0.25, shape = 16, width = 0.25) +  
+  geom_violin(trim = TRUE, scale = "area", fill = "grey", color = "black") +  # Combine sites
+  labs(x = "Month", y = "Diet proportion") +
+  scale_x_discrete(labels = season_labs) +  
+  theme_bw() +
+  ggtitle("Sample derived Chinook diet proportions") + 
+  theme(
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    strip.text.x = element_text(size = 12, color = "black", face = "bold"), 
+    strip.text.y = element_text(size = 12, color = "black", face = "bold"), 
+    legend.position = c(0.8, 0.8), 
+    axis.title.x = element_text(face = "bold", size = 14, hjust = 0.5, vjust = 0.00),
+    axis.title.y = element_text(face = "bold", size = 14, hjust = 0.5, vjust = 2.50),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    panel.spacing = unit(1.15, "lines")
+  )
+
+prop_plot1
+prop_plot2
+
+```
+
+## Fit the model
+
+Here we run 4 MCMC chains on a seasonal model that assumes that the average diet proportion varies by season.
+
+```{r ZOIB model fit, cache=TRUE}
+chains = 4 # Number of MCMC chains to run
+
+seasonal<- zoib(model_df$PRCNT ~ as.factor(season)|1|1, data=model_df, random = 0, EUID=model_df$sample, joint=FALSE, 
+                zero.inflation = TRUE, one.inflation = FALSE, 
+                n.iter = 2000, 
+                n.chain = chains, 
+                n.thin = 1, 
+                n.burn = 1000)
+
+preds_seasonal<- rbind(seasonal$ypred[[1]], seasonal$ypred[[2]], seasonal$ypred[[3]], seasonal$ypred[[4]])
+```
+
+## Produce n samples from the posterior predictive distributions, for each season
+
+```{r ZOIB sample replicates, cache=TRUE}
+n_samples<- 2000
+# This is the start of each season in the sample list
+winter_start <- as.numeric(row.names(model_df[model_df$season=="winter", ]))[1]
+spring_start<- as.numeric(row.names(model_df[model_df$season=="spring", ]))[1]
+summer_start<- as.numeric(row.names(model_df[model_df$season=="summer", ]))[1]
+
+# Generate n samples for each seasonal estimate
+winter_samples <- sample(preds_seasonal[,winter_start], n_samples, TRUE)
+summary(winter_samples)
+spring_samples<- sample(preds_seasonal[,spring_start], n_samples, TRUE)
+summer_samples<- sample(preds_seasonal[,summer_start], n_samples, TRUE)
+```
+
+## Plot seasonal diet proportions (histogram of n_samples)
+
+```{r Plot ZOIB samples, cache=TRUE}
+par(mfrow=c(3,1), oma=c(5,4,2,1), mar=c(1,0,1,0)+0.1)
+hist(winter_samples, xlim=c(0,0.3), ann=FALSE, yaxt="n", col = alpha(plot_col[1], 0.50), breaks=15)
+mtext(side=2, font=2, line=2.0, "Winter", outer = FALSE)
+hist(spring_samples, xlim=c(0,0.3), ann=FALSE, yaxt="n", col = alpha(plot_col[2], 0.50), breaks=15)
+mtext(side=2, font=2, line=2.0, "Spring", outer = FALSE)
+hist(summer_samples, xlim=c(0,0.3), ann=FALSE, yaxt="n", col = alpha(plot_col[3], 0.50), breaks=15)
+mtext(side=2, font=2, line=2.0, "Summer", outer = FALSE)
+mtext(side=1, font=2, line=2.0, "Diet proportion", outer = TRUE)
+```
+
+# Total Chinook biomass consumed
+
+## Chinook diet percentage from ZOIB model
+
+::: panel-tabset
+### Overall
+
+```{r overall Chinook diet proportion, cache=TRUE}
+chinprop <- cbind(winter_samples, spring_samples, summer_samples)
+
+chinprop_CI <- quantile(chinprop,probs = c(0.5, 0.025, 0.975, 0.25,0.75))
+
+kable(chinprop_CI)
+
+```
+
+### Winter
+
+```{r winter Chinook diet proportion, cache=TRUE}
+winter_allChinook_proportion <- quantile(winter_samples,probs = c(0.5, 0.025, 0.975, 0.25,0.75))
+winter_allChinook_proportion
+```
+
+### Spring
+
+```{r spring Chinook diet proportion, cache=TRUE}
+spring_allChinook_proportion <- quantile(spring_samples,probs = c(0.5, 0.025, 0.975, 0.25,0.75))
+spring_allChinook_proportion
+```
+
+### Summer
+
+```{r summer Chinook diet proportion, cache=TRUE}
+summer_allChinook_proportion <- quantile(summer_samples,probs = c(0.5, 0.025, 0.975, 0.25,0.75))
+summer_allChinook_proportion
+```
+:::
+
+## Seasonal consumption of Chinook Biomass  (in metric tons) 
+
+::: panel-tabset
+### Winter
+
+```{r winter Chinook biomass consumed, cache=TRUE}
+chin_mass_calc <- function(tot_biomass, sample_list) {
+  total_chin <- tot_biomass * sample_list
+  quantiles <- quantile(total_chin, probs = c(0.5, 0.025, 0.975, 0.25, 0.75))
+  result <- list(
+    total_samples = total_chin,
+    quantiles = quantiles)
+   return(result)
+ }
+
+#by demographic
+Win.Juv.F_tot_chin <- chin_mass_calc(tot_biomass_WinterJuvF, winter_samples)
+Win.Juv.M_tot_chin <- chin_mass_calc(tot_biomass_WinterJuvM, winter_samples)
+Win.Ad.F_tot_chin <- chin_mass_calc(tot_biomass_WinterAdF, winter_samples)
+Win.Ad.M_tot_chin <- chin_mass_calc(tot_biomass_WinterAdM, winter_samples)
+
+# Calculate total for Winter 
+Winter_tot_chin <- (Win.Juv.F_tot_chin$total_samples + 
+                    Win.Juv.M_tot_chin$total_samples + 
+                    Win.Ad.F_tot_chin$total_samples + 
+                    Win.Ad.M_tot_chin$total_samples) / 1000
+
+Winter_tot_chin_sum <- quantile(Winter_tot_chin, probs = c(0.5, 0.025, 0.975, 0.25, 0.75))
+Winter_tot_chin_sum
+
+```
+
+### Spring
+
+```{r spring Chinook biomass consumed, cache=TRUE}
+#by demographic
+Spr.Juv.F_tot_chin <- chin_mass_calc(tot_biomass_SpringJuvF, spring_samples)
+Spr.Juv.M_tot_chin <- chin_mass_calc(tot_biomass_SpringJuvM, spring_samples)
+Spr.Ad.F_tot_chin <- chin_mass_calc(tot_biomass_SpringAdF, spring_samples)
+Spr.Ad.M_tot_chin <- chin_mass_calc(tot_biomass_SpringAdM, spring_samples)
+
+# Calculate total for spring
+Spring_tot_chin <- (Spr.Juv.F_tot_chin$total_samples + 
+                    Spr.Juv.M_tot_chin$total_samples + 
+                    Spr.Ad.F_tot_chin$total_samples + 
+                    Spr.Ad.M_tot_chin$total_samples) / 1000
+
+Spring_tot_chin_sum <- quantile(Spring_tot_chin, probs = c(0.5, 0.025, 0.975, 0.25, 0.75))
+Spring_tot_chin_sum
+```
+
+### Summer
+
+```{r summer Chinook biomass consumed, cache=TRUE}
+#by demographic
+Sum.Juv.F_tot_chin <- chin_mass_calc(tot_biomass_SummerJuvF, summer_samples)
+Sum.Juv.M_tot_chin <- chin_mass_calc(tot_biomass_SummerJuvM, summer_samples)
+Sum.Ad.F_tot_chin <- chin_mass_calc(tot_biomass_SummerAdF, summer_samples)
+Sum.Ad.M_tot_chin <- chin_mass_calc(tot_biomass_SummerAdM, summer_samples)
+
+# Calculate total for summer
+Summer_tot_chin <- (Sum.Juv.F_tot_chin$total_samples + 
+                    Sum.Juv.M_tot_chin$total_samples + 
+                    Sum.Ad.F_tot_chin$total_samples + 
+                    Sum.Ad.M_tot_chin$total_samples) / 1000
+
+Summer_tot_chin_sum <- quantile(Summer_tot_chin, probs = c(0.5, 0.025, 0.975, 0.25, 0.75))
+Summer_tot_chin_sum
+```
+:::
+
+## Summary of Chinook Biomass (in metric tons) consumed by SSL
+
+```{r total Chinook biomass, cache=TRUE}
+Total_biomass_Chinook <- (Winter_tot_chin + Spring_tot_chin + Summer_tot_chin)
+Total_biomass_Chinook_summary <- quantile(Total_biomass_Chinook,probs = c(0.5, 0.025, 0.975, 0.25,0.75))
+Total_biomass_Chinook_summary
+```
+
+```{r summary of Chinook biomass consumed, cache=TRUE}
+tot_chin_data <- list(
+  Winter = Winter_tot_chin_sum,
+  Spring = Spring_tot_chin_sum,
+  Summer = Summer_tot_chin_sum
+)
+
+# Convert the list to a data frame
+biomass_chinook_seasonal_df <- bind_rows(
+  lapply(names(tot_chin_data), function(season) {
+    data.frame(
+      season = season,
+      avg = tot_chin_data[[season]][["50%"]],
+      ci_min = tot_chin_data[[season]][["2.5%"]],
+      ci_max = tot_chin_data[[season]][["97.5%"]],
+      ci_low = tot_chin_data[[season]][["25%"]],
+      ci_high = tot_chin_data[[season]][["75%"]]
+    )
+  })
+)
+
+biomass_chinook_seasonal_df
+
+write.csv(biomass_chinook_seasonal_df, file="code outputs/biomass_allChinook.csv")
+```
+
+
+
+# Part 4: Consumption of Age-0 Chinook
+
+## Adding uncertainty around age-0 proportions
+
+Here we use a beta distribution to add uncertainty based off of the proportion of age-0 fish per season, and the total number of samples collected each season. Further, we calculate the values used later in the sensitivity analysis.
+
+### Age-0 proportion of Chinook recovered
+
+```{r age0 prop calculation, cache=TRUE}
+proportions <- c(winter = 0.58, spring = 0.55, summer = 0.35)
+sample_sizes <- c(winter = 29, spring = 18, summer = 17)
+
+# Define percentage changes for sensitivity analysis
+percent_changes <- c(0.10, 0.25, 0.50)
+
+# Function to adjust proportions and include original proportions
+adjust_proportions <- function(proportions, percent_changes) {
+  # Create a data frame to store the original proportions
+  df <- data.frame(Season = names(proportions), 
+                   Original_Proportion = proportions)
+  
+  # Loop over each percent change to calculate adjusted proportions
+  for (change in percent_changes) {
+    # Calculate adjusted proportions (Up and Down) and add them to the data frame
+    df[[paste0("Change_", change * 100, "%_Up")]] <- sapply(proportions, function(prop) prop * (1 + change))
+    df[[paste0("Change_", change * 100, "%_Down")]] <- sapply(proportions, function(prop) prop * (1 - change))
+  }
+  
+  # Return the data frame with original and adjusted proportions
+  df
+}
+
+# Apply the function and store the result
+proportions_df <- adjust_proportions(proportions, percent_changes)
+
+# Function to generate samples
+generate_samples <- function(proportion, sample_size, num_samples) {
+  alpha <- proportion * (sample_size - 1) + 1
+  beta <- (1 - proportion) * (sample_size - 1) + 1
+  rbeta(num_samples, alpha, beta)
+}
+
+# Number of samples to generate
+num_samples <- 2000
+
+# Function to calculate summary statistics
+calculate_summary_stats <- function(samples) {
+  summary_x <- summary(samples)
+  mean_x <- mean(samples)
+  cv <- sd(samples) / mean_x
+  data.frame(Mean = mean_x, SD = sd(samples), CV = cv, Min = summary_x[["Min."]], 
+             `1st Qu.` = summary_x[["1st Qu."]], Median = summary_x[["Median"]], 
+             Mean_Summary = summary_x[["Mean"]], `3rd Qu.` = summary_x[["3rd Qu."]], 
+             Max = summary_x[["Max."]])
+}
+
+# Initialize list to store all results and samples
+all_results <- list()
+all_samples <- list()
+
+# Iterate over each row in the proportions data frame
+for (i in 1:nrow(proportions_df)) {
+  # Extract the season and its sample size
+  season <- proportions_df$Season[i]
+  sample_size <- sample_sizes[season]
+  
+  # Iterate over each adjusted proportion (original and adjusted)
+  for (j in 2:ncol(proportions_df)) {
+    change_name <- colnames(proportions_df)[j]
+    proportion <- proportions_df[i, j]
+    
+    # Generate samples for each adjusted proportion
+    samples <- generate_samples(proportion, sample_size, num_samples)
+    
+    # Calculate summary statistics
+    summary_stats <- calculate_summary_stats(samples)
+    
+    # Store results and samples
+    all_results[[paste(season, change_name, sep = "_")]] <- summary_stats
+    all_samples[[paste(season, change_name, sep = "_")]] <- samples
+    
+    # Convert to a data frame for visualization
+    samples_df <- data.frame(
+      Proportion = samples,
+      Season = season,
+      Change = change_name
+    )
+    
+    # Plot the distribution of generated proportions for each season and change
+  }
+}
+# Collect results into a single data frame for comparison
+results_df <- do.call(rbind, lapply(names(all_results), function(change_name) {
+  stats <- all_results[[change_name]]
+  stats_df <- as.data.frame(stats)  # Convert to a data frame
+  stats_df$Change <- change_name
+  stats_df
+}))
+
+# Print the cleaned-up results
+kable(results_df)
+
+# Function to retrieve generated samples for a specific season and change
+get_samples <- function(season, change_name) {
+  sample_key <- paste(season, change_name, sep = "_")
+  all_samples[[sample_key]]
+}
+```
+
+
+```{r plot ratio of age-0 by season, cache=TRUE}
+# Initialize a data frame to store all samples for plotting
+# Initialize a data frame to store all samples for plotting
+combined_samples_df <- data.frame()
+
+# Initialize a data frame to store means for plotting
+means_df <- data.frame()
+
+# Iterate over each row in the proportions data frame
+for (i in 1:nrow(proportions_df)) {
+  # Extract the season and its sample size
+  season <- proportions_df$Season[i]
+  sample_size <- sample_sizes[season]
+  
+  # Iterate over each adjusted proportion (original and adjusted)
+  for (j in 2:ncol(proportions_df)) {
+    change_name <- colnames(proportions_df)[j]
+    proportion <- proportions_df[i, j]
+    
+    # Generate samples for each adjusted proportion
+    samples <- generate_samples(proportion, sample_size, num_samples)
+    
+    # Calculate mean for each group and store it in the means_df
+    mean_value <- mean(samples)
+    means_df <- rbind(means_df, data.frame(Proportion = mean_value, Season = season, Change = change_name))
+    
+    # Convert to a data frame for visualization and store in the combined data frame
+    samples_df <- data.frame(
+      Proportion = samples,
+      Season = season,
+      Change = change_name
+    )
+    combined_samples_df <- rbind(combined_samples_df, samples_df)
+  }
+}
+
+# Plot the combined samples for each season with adjustments overlaid
+plot_combined_overlay <- ggplot(combined_samples_df, aes(x = Proportion, fill = Change)) +
+  geom_histogram(position = "identity", binwidth = 0.02, alpha = 0.5) +  # Use 'identity' to overlay histograms
+  geom_vline(data = means_df, aes(xintercept = Proportion, color = Change), linetype = "dashed", size = 1) +  # Add mean lines
+  labs(title = "Ratio of Age-0 to Other Aged Fish with Adjustments",
+       x = "Proportion",
+       y = "Frequency") +
+  scale_fill_manual(values = c("Original_Proportion" = "gray", 
+                               "Change_10%_Up" = "#1f77b4", 
+                               "Change_10%_Down" = "#2ca02c", 
+                               "Change_25%_Up" = "#ff7f0e", 
+                               "Change_25%_Down" = "#d62728", 
+                               "Change_50%_Up" = "#9467bd", 
+                               "Change_50%_Down" = "#8c564b")) +
+  scale_color_manual(values = c("Original_Proportion" = "black", 
+                                "Change_10%_Up" = "#1f77b4", 
+                                "Change_10%_Down" = "#2ca02c", 
+                                "Change_25%_Up" = "#ff7f0e", 
+                                "Change_25%_Down" = "#d62728", 
+                                "Change_50%_Up" = "#9467bd", 
+                                "Change_50%_Down" = "#8c564b")) +  # Matching colors for mean lines
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "right", legend.title = element_blank()) +
+  facet_wrap(~ Season, ncol = 1)  # Facet by season to create three plots (one for each season)
+
+
+plot_combined_overlay
+```
+
+
+
+
+```{r by percent change, cache=TRUE}
+# Plot the combined samples with faceting by 'Change'
+# Filter out 'Original_Proportion' from the combined samples data frame for the faceted plot
+faceted_samples_df <- combined_samples_df[combined_samples_df$Change != "Original_Proportion", ]
+
+# Create the faceted plot without the "Original_Proportion"
+plot_combined <- ggplot(faceted_samples_df, aes(x = Proportion, fill = Season)) +
+  geom_histogram(position = "dodge", bins = 30, alpha = 0.7) +
+  labs(title = "Ratio of Age-0 to Other Aged Fish for Different Changes",
+       x = "Proportion",
+       y = "Frequency") +
+  scale_fill_manual(values = c("winter" = "#1f77b4", "spring" = "#2ca02c", "summer" = "#ff7f0e")) +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "right", legend.title = element_blank()) +
+  facet_wrap(~ Change, ncol = 2)
+
+original_samples_df <- combined_samples_df[combined_samples_df$Change == "Original_Proportion", ]
+
+plot_original <- ggplot(original_samples_df, aes(x = Proportion, fill = Season)) +
+  geom_histogram(position = "dodge", bins = 30, alpha = 0.7) +
+  labs(title = "Ratio of Age-0 to Other Aged Fish - Original Proportion",
+       x = "Proportion",
+       y = "Frequency") +
+  scale_fill_manual(values = c("winter" = "#1f77b4", "spring" = "#2ca02c", "summer" = "#ff7f0e")) +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "right", legend.title = element_blank())
+
+plot_combined
+plot_original
+
+```
+
+## Determining Age-0 diet proportion of total diet
+
+```{r age0 diet comp calculation , cache=TRUE}
+# Original season samples list
+season_samples <- list(
+  winter = winter_samples,
+  spring = spring_samples,
+  summer = summer_samples
+)
+
+# Initialize list to store all adjusted samples after multiplying by seasonal samples
+all_adjusted_samples <- list()
+
+# Iterate over each combination of season and proportion change in the all_samples list
+for (sample_key in names(all_samples)) {
+  # Extract the season and change details from the sample key (e.g., "winter_Change_10%_Up")
+  key_split <- strsplit(sample_key, "_")[[1]]
+  season <- key_split[1]
+  
+  # This captures both the percentage change and whether it's "Up" or "Down" (e.g., "Change_10%_Up")
+  change_name <- paste(key_split[2], key_split[3], key_split[4], sep = "_")  
+  
+  # Multiply the corresponding samples by the seasonal samples for that season
+  adjusted_samples <- all_samples[[sample_key]] * season_samples[[season]]
+  
+  # Store the adjusted samples back into the new list
+  all_adjusted_samples[[sample_key]] <- adjusted_samples
+}
+
+# Create a combined list to store all samples for each change group across all seasons
+overall_samples <- list()
+
+# Combine samples across all seasons for each change group
+for (change_group in unique(sapply(names(all_samples), function(sample_key) {
+  key_split <- strsplit(sample_key, "_")[[1]]
+  paste(key_split[2], key_split[3], key_split[4], sep = "_")
+}))) {
+  # Collect samples from all seasons for this change group
+  combined_samples <- unlist(lapply(names(all_adjusted_samples), function(sample_key) {
+    if (grepl(change_group, sample_key)) {
+      return(all_adjusted_samples[[sample_key]])
+    } else {
+      return(NULL)
+    }
+  }))
+  
+  # Store the combined samples
+  overall_samples[[change_group]] <- combined_samples
+}
+
+# Function to retrieve adjusted samples for a specific season and change
+get_adjusted_samples <- function(season, change_name) {
+  sample_key <- paste(season, change_name, sep = "_")
+  all_adjusted_samples[[sample_key]]
+}
+
+# Create a summary dataframe for adjusted samples
+# Create a summary dataframe for adjusted samples
+adjusted_samples_df <- do.call(rbind, lapply(names(all_adjusted_samples), function(sample_key) {
+  key_split <- strsplit(sample_key, "_")[[1]]
+  season <- key_split[1]
+  
+  # Correctly capture the full "Change" (e.g., "Change_10%_Up")
+  change <- paste(key_split[2], key_split[3], key_split[4], sep = "_")
+  
+  # Calculate summary statistics including CI
+  median_val <- median(all_adjusted_samples[[sample_key]])
+  sd_val <- sd(all_adjusted_samples[[sample_key]])
+  ci_95 <- quantile(all_adjusted_samples[[sample_key]], probs = c(0.025, 0.975), names = FALSE)
+  ci_50 <- quantile(all_adjusted_samples[[sample_key]], probs = c(0.25, 0.75), names = FALSE)
+  
+  data.frame(
+    Season = season,
+    Change = change,  # Now includes "Up" or "Down"
+    Median = median_val,
+    SD = sd_val,
+    CI_95_Lower = ci_95[1],
+    CI_95_Upper = ci_95[2],
+    CI_50_Lower = ci_50[1],
+    CI_50_Upper = ci_50[2]
+  )
+}))
+
+# Create a summary dataframe for overall samples
+overall_samples_df <- do.call(rbind, lapply(names(overall_samples), function(change_group) {
+  # Calculate summary statistics for the combined overall samples
+  median_val <- median(overall_samples[[change_group]])
+  sd_val <- sd(overall_samples[[change_group]])
+  ci_95 <- quantile(overall_samples[[change_group]], probs = c(0.025, 0.975), names = FALSE)
+  ci_50 <- quantile(overall_samples[[change_group]], probs = c(0.25, 0.75), names = FALSE)
+  
+  data.frame(
+    Season = "Overall",
+    Change = change_group,
+    Median = median_val,
+    SD = sd_val,
+    CI_95_Lower = ci_95[1],
+    CI_95_Upper = ci_95[2],
+    CI_50_Lower = ci_50[1],
+    CI_50_Upper = ci_50[2]
+  )
+}))
+
+# Combine the seasonal and overall dataframes
+final_summary_df <- rbind(adjusted_samples_df, overall_samples_df)
+
+# Display the final summary dataframe
+kable(final_summary_df)
+
+
+```
+
+```{r plot age-0 sensitivity by season, cache=TRUE}
+combined_samples_df <- do.call(rbind, lapply(names(all_adjusted_samples), function(sample_key) {
+  key_split <- strsplit(sample_key, "_")[[1]]
+  season <- key_split[1]
+  change <- paste(key_split[2], key_split[3], key_split[4], sep = "_")
+  
+  # Create a dataframe for each set of adjusted samples
+  data.frame(
+    Proportion = all_adjusted_samples[[sample_key]],
+    Season = season,
+    Change = change
+  )
+}))
+
+# Use the adjusted_samples_df for the mean lines
+means_df <- adjusted_samples_df
+
+# Create the plot with adjusted data for each season
+plot_combined_overlay <- ggplot(combined_samples_df, aes(x = Proportion, fill = Change)) +
+  geom_histogram(position = "identity", binwidth = 0.001, alpha = 0.5) +  # Overlay histograms
+  labs(title = "Proportion Adjustments by Season",
+       x = "Proportion",
+       y = "Frequency") +
+  scale_fill_manual(values = c("Change_10%_Down" = "#66c2a5", 
+                               "Change_10%_Up" = "#3288bd", 
+                               "Change_25%_Down" = "#abdda4", 
+                               "Change_25%_Up" = "#fdae61", 
+                               "Change_50%_Down" = "#e6f598", 
+                               "Change_50%_Up" = "#d53e4f", 
+                               "Original_Proportion" = "#542788")) +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "right", legend.title = element_blank()) +
+  facet_wrap(~ Season, ncol = 1)  # Facet by season
+
+# Add mean lines for each group using `means_df`
+plot_combined_overlay <- plot_combined_overlay + 
+  geom_vline(data = means_df, aes(xintercept = Mean, color = Change), 
+             linetype = "dashed", size = 1) +
+  scale_color_manual(values = c("Change_10%_Down" = "#66c2a5", 
+                                "Change_10%_Up" = "#3288bd", 
+                                "Change_25%_Down" = "#abdda4", 
+                                "Change_25%_Up" = "#fdae61", 
+                                "Change_50%_Down" = "#e6f598", 
+                                "Change_50%_Up" = "#d53e4f", 
+                                "Original_Proportion" = "#542788"))  # Match colors to fill
+plot_combined_overlay
+```
+
+```{r plot of age0 diet comp, cache=TRUE}
+# Filter out the "Original_Proportion_NA" if it exists in the adjusted_samples_df
+faceted_samples_df <- combined_samples_df[combined_samples_df$Change != "Original_Proportion_NA", ]
+
+plot_combined1 <- ggplot(faceted_samples_df, aes(x = Proportion, fill = Season)) +
+  geom_histogram(position = "dodge", bins = 30, alpha = 0.7) +
+  labs(title = "Proportion of Chinook in diet",
+       x = "Proportion",
+       y = "Frequency") +
+  scale_fill_manual(values = c("winter" = "#1f77b4", "spring" = "#2ca02c", "summer" = "#ff7f0e")) +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "right", legend.title = element_blank()) +
+  facet_wrap(~ Change, ncol = 2)
+
+# Plot for "Original_Proportion"
+original_samples_df <- combined_samples_df[combined_samples_df$Change == "Original_Proportion_NA", ]
+
+plot_original2 <- ggplot(original_samples_df, aes(x = Proportion, fill = Season)) +
+  geom_histogram(position = "dodge", bins = 30, alpha = 0.7) +
+  labs(title = "Ratio of Age-0 to Other Aged Fish - Original Proportion",
+       x = "Proportion",
+       y = "Frequency") +
+  scale_fill_manual(values = c("winter" = "#1f77b4", "spring" = "#2ca02c", "summer" = "#ff7f0e")) +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "right", legend.title = element_blank())
+
+plot_combined1
+plot_original2
+
+```
+
+```{r, cache=TRUE}
+
+age0_model_df <- original_samples_df
+age0_model_df$group <- "Age-0"
+
+chinprop <- as.data.frame(chinprop)
+
+chinMODELdf <- pivot_longer(chinprop, cols = 1:3, names_to = "season", values_to = "PRCNT")
+chinMODELdf$group <- "All"
+
+
+age0_model_df$season <- factor(age0_model_df$Season, levels =  c('winter', 'spring', 'summer'), labels = c('Winter', 'Spring', 'Summer'))
+
+chinMODELdf$season <- factor(chinMODELdf$season, levels =  c('winter_samples', 'spring_samples', 'summer_samples'), labels = c('Winter', 'Spring', 'Summer'))
+
+# Combine both data frames into one
+proportion_df_plot <- bind_rows(
+  age0_model_df %>%
+    mutate(value = Proportion, group = "Age-0"),
+  chinMODELdf %>%
+    rename(value = PRCNT)
+)
+
+proportion_df_plot$group <- factor(proportion_df_plot$group, levels = c("All", "Age-0"))
+# Use a single ggplot object with facet_wrap
+combined_plot <- ggplot(proportion_df_plot, aes(x = season, y = value)) +
+  geom_jitter(aes(color = 2, alpha = 0.1)) +
+  geom_boxplot(fill = 'lightgrey') +
+  labs(x = "Data Source", y = "Chinook Diet proportion (RRA)") + 
+  facet_wrap(~ group, ncol = 1, strip.position = "right") +  # Position labels on the right
+  scale_fill_manual(values = grey) + 
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    strip.text = element_text(size = 12, color = "black", face = "bold"), 
+    legend.position = "none",
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(face = "bold", size = 14, hjust = 0.5, vjust = 2.5),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 10),
+    panel.spacing = unit(1.15, "lines"),
+    strip.placement = "outside"  # Place facet labels outside the plot area
+  )
+
+
+combined_plot
+
+ggsave("Figures/Figure 5.pdf", combined_plot, units = "in", width = 8, height = 5, dpi = 300)
+```
+
+### Extract original proportion samples
+
+```{r age-0 diet proportion, cache=TRUE}
+winter_age0_og <- get_adjusted_samples("winter", "Original_Proportion")
+quantile(winter_age0_og,probs = c(0.5, 0.025, 0.975, 0.25,0.75))
+
+spring_age0_og <- get_adjusted_samples("spring", "Original_Proportion")
+quantile(spring_age0_og,probs = c(0.5, 0.025, 0.975, 0.25,0.75))
+summer_age0_og <- get_adjusted_samples("summer", "Original_Proportion")
+quantile(summer_age0_og,probs = c(0.5, 0.025, 0.975, 0.25,0.75))
+
+chinprop_age0 <- cbind(winter_age0_og, spring_age0_og, summer_age0_og)
+
+chinprop_CI_age0 <- quantile(chinprop_age0,probs = c(0.5, 0.025, 0.975, 0.25,0.75))
+
+kable(chinprop_CI_age0)
+
+
+```
+
+# Function to calculate age-0 biomass (metric tons) for each season and adjusted proportion
+
+```{r age-0 biomass function, cache=TRUE}
+# Initialize an empty list to store the adjusted samples
+adjusted_samples_list <- list()
+
+# Initialize an empty data frame to store the seasonal biomass results
+seasonal_biomass_samples_df <- data.frame()
+
+# Initialize an empty data frame to store the total biomass results across all seasons
+total_biomass_samples_df <- data.frame()
+
+# Function to calculate biomass for a given season
+calculate_biomass <- function(season, current_samples) {
+  results <- list()
+  
+  if (season == "winter") {
+    results$Win.Juv.F_age0bm <- chin_mass_calc(tot_biomass_WinterJuvF, current_samples)
+    results$Win.Juv.M_age0bm <- chin_mass_calc(tot_biomass_WinterJuvM, current_samples)
+    results$Win.Ad.F_age0bm <- chin_mass_calc(tot_biomass_WinterAdF, current_samples)
+    results$Win.Ad.M_age0bm <- chin_mass_calc(tot_biomass_WinterAdM, current_samples)
+    
+    # Calculate total biomass for Winter
+    results$total_biomass <- (results$Win.Juv.F_age0bm$total_samples +
+                              results$Win.Juv.M_age0bm$total_samples +
+                              results$Win.Ad.F_age0bm$total_samples +
+                              results$Win.Ad.M_age0bm$total_samples) / 1000
+  } else if (season == "spring") {
+    results$Spr.Juv.F_age0bm <- chin_mass_calc(tot_biomass_SpringJuvF, current_samples)
+    results$Spr.Juv.M_age0bm <- chin_mass_calc(tot_biomass_SpringJuvM, current_samples)
+    results$Spr.Ad.F_age0bm <- chin_mass_calc(tot_biomass_SpringAdF, current_samples)
+    results$Spr.Ad.M_age0bm <- chin_mass_calc(tot_biomass_SpringAdM, current_samples)
+    
+    # Calculate total biomass for Spring
+    results$total_biomass <- (results$Spr.Juv.F_age0bm$total_samples +
+                              results$Spr.Juv.M_age0bm$total_samples +
+                              results$Spr.Ad.F_age0bm$total_samples +
+                              results$Spr.Ad.M_age0bm$total_samples) / 1000
+  } else if (season == "summer") {
+    results$Sum.Juv.F_age0bm <- chin_mass_calc(tot_biomass_SummerJuvF, current_samples)
+    results$Sum.Juv.M_age0bm <- chin_mass_calc(tot_biomass_SummerJuvM, current_samples)
+    results$Sum.Ad.F_age0bm <- chin_mass_calc(tot_biomass_SummerAdF, current_samples)
+    results$Sum.Ad.M_age0bm <- chin_mass_calc(tot_biomass_SummerAdM, current_samples)
+    
+    # Calculate total biomass for Summer
+    results$total_biomass <- (results$Sum.Juv.F_age0bm$total_samples +
+                              results$Sum.Juv.M_age0bm$total_samples +
+                              results$Sum.Ad.F_age0bm$total_samples +
+                              results$Sum.Ad.M_age0bm$total_samples) / 1000
+  }
+  
+  return(results)
+}
+
+# Initialize lists to store results
+all_demographic_results <- list()
+seasonal_biomass_samples_df <- data.frame()
+total_biomass_samples_df <- data.frame()
+total_biomass_across_seasons <- list()
+
+# Loop over all generated samples for each season and change
+for (sample_key in names(all_samples)) {
+  key_parts <- strsplit(sample_key, "_")[[1]]
+  season <- key_parts[1]
+  change_name <- paste(key_parts[-1], collapse = "_")
+
+  current_samples <- all_samples[[sample_key]]
+  
+  if (season == "winter") {
+    adjusted_samples <- winter_samples * current_samples
+  } else if (season == "spring") {
+    adjusted_samples <- spring_samples * current_samples
+  } else if (season == "summer") {
+    adjusted_samples <- summer_samples * current_samples
+  }
+  
+  adjusted_samples_list[[sample_key]] <- adjusted_samples
+  
+  # Perform the biomass calculation
+  results <- calculate_biomass(season, adjusted_samples)
+  
+  # Store all demographic results
+  all_demographic_results[[sample_key]] <- results
+  
+  # Store the seasonal biomass
+  seasonal_biomass_samples_df <- rbind(seasonal_biomass_samples_df, 
+                                       data.frame(Season = season, 
+                                                  Change = change_name, 
+                                                  Seasonal_Samples = results$total_biomass))
+
+  # Accumulate total biomass across seasons
+  if (!is.null(total_biomass_across_seasons[[change_name]])) {
+    total_biomass_across_seasons[[change_name]] <- total_biomass_across_seasons[[change_name]] + results$total_biomass
+  } else {
+    total_biomass_across_seasons[[change_name]] <- results$total_biomass
+  }
+}
+
+# Convert total biomass across seasons list into a data frame
+for (change_name in names(total_biomass_across_seasons)) {
+  total_biomass_samples_df <- rbind(total_biomass_samples_df, 
+                                    data.frame(Change = change_name, 
+                                               Total_Samples = total_biomass_across_seasons[[change_name]]))
+}
+
+
+# Summarize the seasonal biomass results
+seasonal_biomass_summary <- seasonal_biomass_samples_df %>%
+  group_by(Season, Change) %>%
+  summarise(
+    avg = quantile(Seasonal_Samples, probs = 0.5),
+    ci_min = quantile(Seasonal_Samples, probs = 0.025),
+    ci_low = quantile(Seasonal_Samples, probs = 0.25),
+    ci_high = quantile(Seasonal_Samples, probs = 0.75),
+    ci_max = quantile(Seasonal_Samples, probs = 0.975),
+    .groups = 'drop'
+  )
+
+# Summarize the total biomass results across seasons
+age0_biomass_summary <- total_biomass_samples_df %>%
+  group_by(Change) %>%
+  summarise(avg = quantile(Total_Samples, probs = 0.5),
+    ci_min = quantile(Total_Samples, probs = 0.025),
+    ci_low = quantile(Total_Samples, probs = 0.25),
+    ci_high = quantile(Total_Samples, probs = 0.75),
+    ci_max = quantile(Total_Samples, probs = 0.975),
+    .groups = 'drop')
+
+age0_biomass_summary$Change_Simplified <- sub(".*_(Original_Proportion|Change_.*)", "\\1", age0_biomass_summary$Change)
+
+age0_biomass_summary_seasonal <- seasonal_biomass_summary %>%
+  mutate(Change_Simplified = gsub("_", " ", Change),
+         Change_Simplified = gsub("Change", "", Change),
+         Change_Simplified = gsub("Up", "Increase", Change),
+         Change_Simplified = gsub("Down", "Decrease", Change),
+         # Convert Season to a factor with specified levels to ensure order
+         Season = factor(Season, levels = c("winter", "spring", "summer")))
+
+changes_df <- age0_biomass_summary_seasonal %>%
+  filter(!grepl("Original_Proportion", Change_Simplified))
+original_proportions_df <- age0_biomass_summary_seasonal %>%
+  filter(grepl("Original_Proportion", Change_Simplified)) %>%
+  mutate(
+    Season = recode(Season, "winter" = "Winter", "spring" = "Spring", "summer" = "Summer"))
+
+
+kable(age0_biomass_summary, label = "Age-0 Chinook Biomass Consumed")
+
+```
+
+```{r sensitivity of age-0 biomass plot, cache=TRUE}
+
+# Plot the changes (excluding original proportions) with facet_wrap
+change_plot <- ggplot(changes_df, aes(x = Season, y = avg)) +
+  geom_bar(stat = "identity", fill = "gray") +
+  geom_errorbar(aes(ymin = ci_min, ymax = ci_max), width = 0.2, color = "black", size = 0.8) +
+  geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0, color = "orange", size = 6) +
+  labs(title = "Total Biomass of Prey Consumed by Season (Excluding Original Proportions)",
+       x = "Season",
+       y = "Total Biomass of Prey Consumed (metric tons)") +
+  theme_minimal() +
+  facet_wrap(~ Change_Simplified, scales = "fixed", ncol = 2)
+
+change_plot
+
+
+# Plot only the original proportions
+original_plot <- ggplot(original_proportions_df, aes(x = Season, y = avg)) +
+  geom_bar(stat = "identity", fill = "gray") +
+  # Add larger confidence interval (ci_min and ci_max)
+  geom_errorbar(aes(ymin = ci_min, ymax = ci_max), width = 0.2, color = "black", size = 0.8) +
+  # Add smaller confidence interval (ci_low and ci_high)
+  geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0, color = "orange", size = 6) +
+  labs(title = "Total Biomass of Prey Consumed - Original Proportions",
+       x = "Season",
+       y = "Total Biomass of Prey Consumed (metric tons)") +
+  theme_minimal()
+
+# Display the original proportions plot
+original_plot
+
+kable(original_proportions_df)
+```
+
+### Figure 6: Total chinook consumed relative to age-0 consumed
+```{r figure 6 biomass plot, cache=TRUE}
+allChin <- biomass_chinook_seasonal_df %>% select(season, avg, ci_min, ci_max, ci_low, ci_high)
+
+
+original_proportions_df$season <- original_proportions_df$Season
+age0chin <- original_proportions_df %>% select(season, avg, ci_min, ci_max, ci_low, ci_high)
+
+
+allChin$group <- "all"
+age0chin$group <- "juv"
+
+fig6dat <- rbind(allChin, age0chin) 
+
+fig6dat$group <- factor(fig6dat$group, levels =  c('all', 'juv'), 
+                        labels = c('Chinook', 'Age-0 Chinook'))
+
+fig6plot <- ggplot(data=fig6dat, aes(x=factor(season, level= seasonorder), y=avg, fill = group)) +
+  geom_bar(stat="identity", size = 0.5, position = "dodge", aes(fill = group), colour = "black") +
+  scale_fill_manual(values = c("snow4","snow1"), name = "Age-class") + 
+  geom_errorbar(data=fig6dat, aes(ymin = ci_min, ymax = ci_max), width =0.1,  position = position_dodge(width = 0.9))+ 
+  geom_errorbar(data=fig6dat, aes(ymin = ci_low, ymax = ci_high), width =0.0, size = 6, col = '#55AFBD', position = position_dodge(width = 0.9)) + 
+  theme_light()  +  
+  theme(text=element_text(size=12)) + 
+  xlab('Season') + 
+  ylab('Biomass of Chinook Consumed (metric tons)')
+
+fig6plot
+
+ggsave("Figures/Figure6.pdf", fig6plot, units = c("in"), width = 8, 
+       height = 5, dpi = 300)
+
+fig4dat_clean <- fig4dat %>% select(c('season','avg','ci_min','ci_max','ci_low', 'ci_high')) %>% mutate(group = "Total Prey")
+
+biomass_plot <- rbind(fig4dat_clean, fig6dat)
+
+biomass_plot <- ggplot(data=biomass_plot, aes(x=factor(season, level= seasonorder), y=avg, fill = group)) +
+  geom_bar(stat="identity", size = 0, position = "dodge", aes(fill = group)) +
+  scale_fill_manual(values = c("gray30","gray66","lightgray"), name = "Age-class") + 
+  geom_errorbar(data=biomass_plot, aes(ymin = ci_min, ymax = ci_max), width =0.1,  position = position_dodge(width = 0.9))+ 
+  geom_errorbar(data=biomass_plot, aes(ymin = ci_low, ymax = ci_high), width =0.0, size = 6, col = '#55AFBD', position = position_dodge(width = 0.9)) + 
+  theme_light()  +  
+  theme(text=element_text(size=12)) + 
+  xlab('Season') + 
+  ylab('Biomass of Chinook Consumed (metric tons)')
+biomass_plot
+
+```
+
+### Bootstrapping 
+```{r sensitivity analysis on biomass function, cache=TRUE}
+# Function to run bootstrap analysis for a given original distribution and a comparison
+# Function to run bootstrap analysis for a given original distribution and a comparison
+run_bootstrap_analysis <- function(original_dist, change_dist, n_sims = 2000) {
+  # Calculate observed difference
+  dist_2<- log(original_dist)
+  dist_1<- log(change_dist)
+  
+  n_samples<- length(dist_1)
+
+  observed_diff <- mean(dist_1) - mean(dist_2)
+  
+  # All data
+  combined <- c(dist_1, dist_2)
+  
+  # Initialize parameters for bootstrapping
+  n <- length(dist_1)  # Size of each resample (same as original datasets)
+  diffs <- numeric(n_sims)  # Vector to store resampled differences
+  
+  # Bootstrap resampling
+  for (i in 1:n_sims) {
+    shuffled <- sample(combined, length(combined), replace = FALSE)
+    dist_1_resample <- shuffled[1:n]
+    dist_2_resample <- shuffled[(n + 1):(2 * n)]
+    diffs[i] <- mean(dist_1_resample) - mean(dist_2_resample)
+  }
+  
+  # Calculate the p-value
+  p_value <- mean(abs(diffs) >= abs(observed_diff))
+  
+  # Return observed difference and p-value
+  return(c(observed_diff = observed_diff, p_value = p_value))
+}
+
+# Initialize empty data frame to store results
+age0_biomass_bootresults <- data.frame(Change_Comparison = character(), Observed_Difference = numeric(), P_Value = numeric(), stringsAsFactors = FALSE)
+
+# Get the original proportion samples
+original_dist <- total_biomass_samples_df %>% filter(Change == "Original_Proportion") %>% pull(Total_Samples)
+
+# List of changes to compare against the original
+changes_to_compare <- c("Change_10%_Up", "Change_10%_Down", "Change_25%_Up", "Change_25%_Down", "Change_50%_Up", "Change_50%_Down")
+
+# Loop through each change and run the bootstrap analysis
+for (change in changes_to_compare) {
+  comparison_dist <- total_biomass_samples_df %>% filter(Change == change) %>% pull(Total_Samples)
+  
+  # Check if the comparison_dist is empty
+  if (length(comparison_dist) == 0) {
+    cat("No data for", change, "\n")
+  } else {
+    # Run the bootstrap analysis
+    result <- run_bootstrap_analysis(original_dist, comparison_dist)
+    
+    # Add the result to the data frame
+    age0_biomass_bootresults <- rbind(age0_biomass_bootresults, data.frame(Change_Comparison = change,
+                                         Observed_Difference = result['observed_diff'],
+                                         P_Value = result['p_value']))
+  }
+}
+
+# Print the results
+
+
+age0_biomass_bootresults$inverse_log_values <- exp(age0_biomass_bootresults$Observed_Difference)
+
+age0_biomass_bootresults$percent_change <- (age0_biomass_bootresults$inverse_log_values-1)*100
+
+age0_biomass_bootresults$base_age0avg <- age0_biomass_summary %>%
+  filter(Change == "Original_Proportion") %>%
+  pull(avg)
+
+age0_biomass_bootresults$expected_value <- age0_biomass_bootresults$base_age0avg * age0_biomass_bootresults$inverse_log_values
+
+age0_biomass_median <- age0_biomass_summary %>% mutate(Median = paste0(round(avg, 1), " (", round(ci_min, 1), "-", round(ci_max, 1), ")")) %>% rename(c("Change_Comparison" = "Change")) %>% select(Change_Comparison, Median)
+
+age0_biomass_bootresults_table <- merge(age0_biomass_median, age0_biomass_bootresults, by = "Change_Comparison", all = TRUE)
+
+kable(age0_biomass_bootresults_table)
+
+```
+
+```{r biomass plot, cache=TRUE}
+
+
+age0_biomass_summary$Change <- factor(
+  age0_biomass_summary$Change,
+  levels = c("Original_Proportion", "Change_10%_Down", "Change_10%_Up", "Change_25%_Down", "Change_25%_Up","Change_50%_Down", "Change_50%_Up"),  # Specify the original order
+  labels = c("Base Model", "10% Decrease", "10% Increase", "25% Decrease", "25% Increase","50% Decrease", "50% Increase")  # Specify the new labels
+)
+
+
+age0_biomass_plot <-  ggplot(age0_biomass_summary, aes(x = Change, y = `avg`, fill = Change)) +
+  geom_bar(stat = "identity", color = "black", fill = "grey") +
+  geom_errorbar(aes(ymin = `ci_min`, ymax = `ci_max`), width = 0.2, color = "black", size = 1) +
+  geom_errorbar(aes(ymin = `ci_low`, ymax = `ci_high`), width = 0, color = "#55AFBD", size = 6) +
+  labs(
+       y = "Biomass consumed (metric tons)", 
+       x = "Change Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+age0_biomass_plot
+
+ggsave("Figures/Figure8.pdf", plot = age0_biomass_plot, width = 8, height = 5, dpi = 300)
+
+```
+## Number of Age-0 Chinook consumed
+
+### Weight of Chinook salmon
+
+```{r weight calculations, cache=TRUE}
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+# Length functions for each month
+DecJuvChinLength <- function() {
+  rlnormTrunc(1, log(236.9987), sdlog = 0.5, min = 100, max = 300)
+}
+
+JanJuvChinLength <- function() {
+  rlnormTrunc(1, log(175.436), sdlog = 0.5, min = 100, max = 300)
+}
+
+FebJuvChinLength <- function() {
+  rlnormTrunc(1, log(170.2746), sdlog = 0.5, min = 100, max = 300)
+}
+
+MarJuvChinLength <- function() {
+  rlnormTrunc(1, log(201.9993), sdlog = 0.5, min = 100, max = 300)
+}
+
+AprJuvChinLength <- function() {
+  rlnormTrunc(1, log(234.8554), sdlog = 0.5, min = 100, max = 300)
+}
+
+MayJuvChinLength <- function() {
+  rlnormTrunc(1, log(173.6663), sdlog = 0.5, min = 100, max = 300)
+}
+
+JunJuvChinLength <- function() {
+  rlnormTrunc(1, log(142.0207), sdlog = 0.5, min = 100, max = 300)
+}
+
+JulJuvChinLength <- function() {
+  rlnormTrunc(1, log(133.1082), sdlog = 0.5, min = 100, max = 300)
+}
+
+AugJuvChinLength <- function() {
+  rlnormTrunc(1, log(151.4996), sdlog = 0.5, min = 100, max = 300)
+}
+
+# Weight functions using lengths
+DecJuvChinWt <- function() {
+  (9.61 * ((DecJuvChinLength() / 10)^3.07)) * (1/1000) * (1/1000)
+}
+
+JanJuvChinWt <- function() {
+  (9.61 * ((JanJuvChinLength() / 10)^3.07)) * (1/1000) * (1/1000)
+}
+
+FebJuvChinWt <- function() {
+  (9.61 * ((FebJuvChinLength() / 10)^3.07)) * (1/1000) * (1/1000)
+}
+
+MarJuvChinWt <- function() {
+  (9.61 * ((MarJuvChinLength() / 10)^3.07)) * (1/1000) * (1/1000)
+}
+
+AprJuvChinWt <- function() {
+  (9.61 * ((AprJuvChinLength() / 10)^3.07)) * (1/1000) * (1/1000)
+}
+
+MayJuvChinWt <- function() {
+  (9.61 * ((MayJuvChinLength() / 10)^3.07)) * (1/1000) * (1/1000)
+}
+
+JunJuvChinWt <- function() {
+  (9.61 * ((JunJuvChinLength() / 10)^3.07)) * (1/1000) * (1/1000)
+}
+
+JulJuvChinWt <- function() {
+  (9.61 * ((JulJuvChinLength() / 10)^3.07)) * (1/1000) * (1/1000)
+}
+
+AugJuvChinWt <- function() {
+  (9.61 * ((AugJuvChinLength() / 10)^3.07)) * (1/1000) * (1/1000)
+}
+
+# Generate length and weight samples for each month
+length_samples_Dec <- replicate(2000, DecJuvChinLength())
+weight_samples_Dec <- replicate(2000, DecJuvChinWt())
+
+length_samples_Jan <- replicate(2000, JanJuvChinLength())
+weight_samples_Jan <- replicate(2000, JanJuvChinWt())
+
+length_samples_Feb <- replicate(2000, FebJuvChinLength())
+weight_samples_Feb <- replicate(2000, FebJuvChinWt())
+
+length_samples_Mar <- replicate(2000, MarJuvChinLength())
+weight_samples_Mar <- replicate(2000, MarJuvChinWt())
+
+length_samples_Apr <- replicate(2000, AprJuvChinLength())
+weight_samples_Apr <- replicate(2000, AprJuvChinWt())
+
+length_samples_May <- replicate(2000, MayJuvChinLength())
+weight_samples_May <- replicate(2000, MayJuvChinWt())
+
+length_samples_Jun <- replicate(2000, JunJuvChinLength())
+weight_samples_Jun <- replicate(2000, JunJuvChinWt())
+
+length_samples_Jul <- replicate(2000, JulJuvChinLength())
+weight_samples_Jul <- replicate(2000, JulJuvChinWt())
+
+length_samples_Aug <- replicate(2000, AugJuvChinLength())
+weight_samples_Aug <- replicate(2000, AugJuvChinWt())
+
+# Combine length samples into a data frame
+length_samples_df <- data.frame(
+  month = rep(c("December", "January", "February", "March", "April", "May", "June", "July", "August"), each = 2000),
+  length_value = c(length_samples_Dec, length_samples_Jan, length_samples_Feb, length_samples_Mar, 
+                   length_samples_Apr, length_samples_May, length_samples_Jun, length_samples_Jul, 
+                   length_samples_Aug)
+)
+
+length_samples_df$month <- factor(
+  length_samples_df$month,
+  levels = c("December", "January", "February", "March", "April", "May", "June", "July", "August")
+)
+
+# Combine weight samples into a data frame
+weight_samples_df <- data.frame(
+  month = rep(c("December", "January", "February", "March", "April", "May", "June", "July", "August"), each = 2000),
+  weight_value = c(weight_samples_Dec, weight_samples_Jan, weight_samples_Feb, weight_samples_Mar, 
+                   weight_samples_Apr, weight_samples_May, weight_samples_Jun, weight_samples_Jul, 
+                   weight_samples_Aug)
+)
+
+
+
+weight_samples_df$month <- factor(
+  weight_samples_df$month,
+  levels = c("December", "January", "February", "March", "April", "May", "June", "July", "August")
+)
+
+mean_length_values <- length_samples_df %>%
+  group_by(month) %>%
+  summarize(mean_length = mean(length_value))
+
+mean_weight_values <- weight_samples_df %>%
+  group_by(month) %>%
+  summarize(mean_weight = mean(weight_value))
+
+# Update length histograms to include mean lines
+length_histogram_plot <- ggplot(length_samples_df, aes(x = length_value)) +
+  geom_histogram(binwidth = 7, fill = "slategray2", color = "grey30", size = 0.2) +
+  geom_vline(
+    data = mean_length_values, 
+    aes(xintercept = mean_length), 
+    color = "salmon4", # Change to a similar color as your weight graph
+    linetype = "dashed", 
+    size = 0.8 # Adjust the line size to match your weight graph
+  ) +
+  labs(
+    x = "Length (mm)", 
+    y = "Frequency"
+  ) +
+  facet_wrap(~ month, ncol = 3) + # Use facet_wrap to arrange the plots by month
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 11, face = "bold")
+  )
+length_histogram_plot
+
+# Update weight histograms to include mean lines
+weight_histogram_plot <- ggplot(weight_samples_df, aes(x = weight_value)) +
+  geom_histogram(
+    binwidth = 0.01, 
+    fill = "darkseagreen3", 
+    color = "black", 
+    size = 0.2, # Adjust the border size of the histogram bars
+    alpha = 0.7 # Adjust the transparency if needed
+  ) +
+  geom_vline(
+    data = mean_weight_values, 
+    aes(xintercept = mean_weight), 
+    color = "salmon4", 
+    linetype = "dashed", 
+    size = 0.8 # Adjust the line size to match your length graph
+  ) +
+  labs(
+    x = "Weight (kg)", 
+    y = "Frequency"
+  ) +
+  facet_wrap(~ month, ncol = 3) + # Use facet_wrap to arrange the plots by month
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 11, face = "bold")
+  )
+weight_histogram_plot
+
+# Save plots
+ggsave("Figures/length_histograms.pdf", plot = length_histogram_plot, width = 12, height = 12, dpi = 300)
+ggsave("Figures/weight_histograms.pdf", plot = weight_histogram_plot, width = 12, height = 12, dpi = 300)
+
+```
+
+### Age-0 Count Function
+
+```{r age0 count function, cache = TRUE}
+calculate_total_salmon_consumed_multi_month_optimized <- function(season, samples_list, abund_func, cf_func, demo_func, prop, days_list, ind_cons_funcs, chinook_weight_funcs) {
+  total_results <- list()  # List to store quantile results with change_name
+  raw_samples <- list()    # List to store raw samples with change_name
+  
+  # Pre-generate the values that don't depend on the loop
+  abund_values <- abund_func()
+  cf_values <- cf_func()
+  demo_values <- demo_func()
+  prop_values <- prop
+  
+  # Pre-generate consumption values and Chinook weights for each month
+  consumption_values <- sapply(ind_cons_funcs, function(func) func())
+  chinook_weights <- sapply(chinook_weight_funcs, function(func) func())
+  
+  # Loop through each change in the adjusted samples
+  for (change_name in names(samples_list)) {
+    if (startsWith(change_name, season)) {
+      # Extract the adjusted samples
+      current_samples <- samples_list[[change_name]]
+      
+      # Calculate total salmon consumed over multiple months in one vectorized step
+      total_consumed <- rowSums(
+        sapply(1:length(days_list), function(i) {
+          (abund_values * cf_values * demo_values * prop_values * days_list[i] * (consumption_values[i] / chinook_weights[i])) * current_samples
+        })
+      )
+      
+      # Store the quantile results with the change_name included
+      quantiles <- quantile(total_consumed, probs = c(0.5, 0.025, 0.975, 0.25, 0.75))
+      total_results[[change_name]] <- data.frame(change_name = change_name, 
+                                                 median = quantiles[1], 
+                                                 lower_95 = quantiles[2], 
+                                                 upper_95 = quantiles[3], 
+                                                 lower_25 = quantiles[4], 
+                                                 upper_75 = quantiles[5])
+      
+      # Store the raw total consumed samples with the change_name included
+      raw_samples[[change_name]] <- data.frame(change_name = change_name, total_consumed = total_consumed)
+    }
+  }
+  
+  # Convert the results to dataframes
+  quantiles_df <- do.call(rbind, total_results)
+  raw_samples_df <- do.call(rbind, raw_samples)
+  
+  return(list(quantiles = quantiles_df, raw_samples = raw_samples_df))
+}
+```
+
+#### Winter
+
+```{r winter demograpic count age 0, cache = TRUE}
+# Winter calculations
+# Winter calculations for Juvenile Females
+count_WinterJuvF <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "winter",
+  samples_list = adjusted_samples_list,
+  abund_func = WinAbund,
+  cf_func = WinSprFallCF,
+  demo_func = WinJuvDemo,
+  prop = PropJuvF,
+  days_list = c(31, 31, 28),  # December, January, February days
+  ind_cons_funcs = list(IndDailyConsumptionJuvF, IndDailyConsumptionJuvF, IndDailyConsumptionJuvF),
+  chinook_weight_funcs = list(DecJuvChinWt, JanJuvChinWt, FebJuvChinWt)
+)
+
+# Winter calculations for Juvenile Males
+count_WinterJuvM <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "winter",
+  samples_list = adjusted_samples_list,
+  abund_func = WinAbund,
+  cf_func = WinSprFallCF,
+  demo_func = WinJuvDemo,
+  prop = PropJuvM,
+  days_list = c(31, 31, 28),  # December, January, February days
+  ind_cons_funcs = list(IndDailyConsumptionJuvM, IndDailyConsumptionJuvM, IndDailyConsumptionJuvM),
+  chinook_weight_funcs = list(DecJuvChinWt, JanJuvChinWt, FebJuvChinWt)
+)
+
+# Winter calculations for Adult Females
+count_WinterAdF <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "winter",
+  samples_list = adjusted_samples_list,
+  abund_func = WinAbund,
+  cf_func = WinSprFallCF,
+  demo_func = WinFemDemo,
+  prop = 1,  # Assuming full representation for adults
+  days_list = c(31, 31, 28),  # December, January, February days
+  ind_cons_funcs = list(IndDailyConsumptionAdF, IndDailyConsumptionAdF, IndDailyConsumptionAdF),
+  chinook_weight_funcs = list(DecJuvChinWt, JanJuvChinWt, FebJuvChinWt)
+)
+
+# Winter calculations for Adult Males
+count_WinterAdM <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "winter",
+  samples_list = adjusted_samples_list,
+  abund_func = WinAbund,
+  cf_func = WinSprFallCF,
+  demo_func = WinMaleDemo,
+  prop = 1,  # Assuming full representation for adults
+  days_list = c(31, 31, 28),  # December, January, February days
+  ind_cons_funcs = list(IndDailyConsumptionAdF, IndDailyConsumptionAdF, IndDailyConsumptionAdF),
+  chinook_weight_funcs = list(DecJuvChinWt, JanJuvChinWt, FebJuvChinWt)
+)
+
+count_WinterAdF_df <- count_WinterAdF$raw_samples
+count_WinterAdM_df <- count_WinterAdM$raw_samples
+count_WinterJuvM_df <- count_WinterJuvM$raw_samples
+count_WinterJuvF_df <- count_WinterJuvF$raw_samples
+```
+
+```{r total winter count age 0, cache=TRUE}
+sum_consumed_by_change_group <- function(demographic_df_list) {
+  # Ensure all dataframes are aligned by change_name
+  for (i in seq_along(demographic_df_list)) {
+    demographic_df_list[[i]] <- demographic_df_list[[i]] %>%
+      arrange(change_name)
+  }
+  
+  # Initialize an empty dataframe to store results
+  result_df <- demographic_df_list[[1]]  # Start with the first dataframe's structure
+  
+  # Summing total_consumed across demographic groups for each change_name
+  result_df$total_consumed <- 0  # Initialize the total_consumed column
+  
+  # Loop through each unique change_name and sum corresponding rows from each demographic dataframe
+  unique_change_names <- unique(result_df$change_name)
+  
+  for (change in unique_change_names) {
+    # Subset each dataframe for the current change_name
+    filtered_dfs <- lapply(demographic_df_list, function(df) df[df$change_name == change, "total_consumed"])
+    
+    # Sum the total_consumed values across demographic groups for this change_name
+    result_df[result_df$change_name == change, "total_consumed"] <- rowSums(do.call(cbind, filtered_dfs), na.rm = TRUE)
+  }
+  
+  return(result_df)
+}
+
+# Example usage: summing across the winter demographic groups within each change_name
+winter_demographic_count <- list(count_WinterAdF_df, count_WinterAdM_df, count_WinterJuvM_df, count_WinterJuvF_df)
+
+# Get the summed results across demographic groups by change_name
+merged_winter_samples <- sum_consumed_by_change_group(winter_demographic_count)
+
+merged_winter_samples$change_name <- sub("^winter_", "", merged_winter_samples$change_name)
+
+quantile_probs <- c(0.025, 0.25, 0.5, 0.75, 0.975)
+
+# Calculate quantiles for each change group, including 25th and 75th percentiles
+merged_winter_samples_sum <- merged_winter_samples %>%
+  group_by(change_name) %>%
+  summarize(
+    ci_min = quantile(total_consumed, probs = 0.025, na.rm = TRUE),
+    ci_low = quantile(total_consumed, probs = 0.25, na.rm = TRUE),
+    avg = quantile(total_consumed, probs = 0.5, na.rm = TRUE),
+    ci_high = quantile(total_consumed, probs = 0.75, na.rm = TRUE),
+    ci_max = quantile(total_consumed, probs = 0.975, na.rm = TRUE)
+  )
+
+row.names(merged_winter_samples) <- NULL
+
+```
+
+```{r spring demographic count age0, cache = TRUE}
+# Spring calculations for Juvenile Females
+count_SpringJuvF <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "spring",
+  samples_list = adjusted_samples_list,
+  abund_func = SprAbund,
+  cf_func = WinSprFallCF,
+  demo_func = SprJuvDemo,
+  prop = PropJuvF,
+  days_list = c(31, 31, 28),  # March, April, May days
+  ind_cons_funcs = list(IndDailyConsumptionJuvF, IndDailyConsumptionJuvF, IndDailyConsumptionJuvF),
+  chinook_weight_funcs = list(MarJuvChinWt, AprJuvChinWt, MayJuvChinWt)
+)
+
+# Spring calculations for Juvenile Males
+count_SpringJuvM <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "spring",
+  samples_list = adjusted_samples_list,
+  abund_func = SprAbund,
+  cf_func = WinSprFallCF,
+  demo_func = SprJuvDemo,
+  prop = PropJuvM,
+  days_list = c(31, 31, 28),  # March, April, May days
+  ind_cons_funcs = list(IndDailyConsumptionJuvM, IndDailyConsumptionJuvM, IndDailyConsumptionJuvM),
+  chinook_weight_funcs = list(MarJuvChinWt, AprJuvChinWt, MayJuvChinWt)
+)
+
+# Spring calculations for Adult Females
+count_SpringAdF <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "spring",
+  samples_list = adjusted_samples_list,
+  abund_func = SprAbund,
+  cf_func = WinSprFallCF,
+  demo_func = SprFemDemo,
+  prop = 1,  # Assuming full representation for adults
+  days_list = c(31, 31, 28),  # March, April, May days
+  ind_cons_funcs = list(IndDailyConsumptionAdF, IndDailyConsumptionAdF, IndDailyConsumptionAdF),
+  chinook_weight_funcs = list(MarJuvChinWt, AprJuvChinWt, MayJuvChinWt)
+)
+
+# Spring calculations for Adult Males
+count_SpringAdM <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "spring",
+  samples_list = adjusted_samples_list,
+  abund_func = SprAbund,
+  cf_func = WinSprFallCF,
+  demo_func = SprMaleDemo,
+  prop = 1,  # Assuming full representation for adults
+  days_list = c(31, 31, 28),  # March, April, May days
+  ind_cons_funcs = list(IndDailyConsumptionAdF, IndDailyConsumptionAdF, IndDailyConsumptionAdF),
+  chinook_weight_funcs = list(MarJuvChinWt, AprJuvChinWt, MayJuvChinWt)
+)
+
+count_SpringAdF_df <- count_SpringAdF$raw_samples
+count_SpringAdM_df <- count_SpringAdM$raw_samples
+count_SpringJuvM_df <- count_SpringJuvM$raw_samples
+count_SpringJuvF_df <- count_SpringJuvF$raw_samples
+```
+
+```{r total spring count age 0, cache = TRUE}
+# Assuming the spring dataframes are similar to the winter ones
+spring_demographic_count <- list(count_SpringAdF_df, count_SpringAdM_df, count_SpringJuvM_df, count_SpringJuvF_df)
+
+# Get the summed results across demographic groups by change_name for Spring
+merged_spring_samples <- sum_consumed_by_change_group(spring_demographic_count)
+
+# Remove the "spring_" prefix from change_name in the Spring dataframe
+merged_spring_samples$change_name <- sub("^spring_", "", merged_spring_samples$change_name)
+
+# Remove row names from Spring dataframe
+row.names(merged_spring_samples) <- NULL
+
+merged_spring_samples_sum <- merged_spring_samples %>%
+  group_by(change_name) %>%
+  summarize(
+    ci_min = quantile(total_consumed, probs = 0.025, na.rm = TRUE),
+    ci_low = quantile(total_consumed, probs = 0.25, na.rm = TRUE),
+    avg = quantile(total_consumed, probs = 0.5, na.rm = TRUE),
+    ci_high = quantile(total_consumed, probs = 0.75, na.rm = TRUE),
+    ci_max = quantile(total_consumed, probs = 0.975, na.rm = TRUE)
+  )
+
+```
+
+```{r summer demographic count age0, cache = TRUE}
+# Summer calculations for Juvenile Females
+count_SummerJuvF <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "summer",
+  samples_list = adjusted_samples_list,
+  abund_func = SumAbund,
+  cf_func = SummerCF,
+  demo_func = SumJuvDemo,
+  prop = PropJuvF,
+  days_list = c(31, 31, 28),  # June, July, August days
+  ind_cons_funcs = list(IndDailyConsumptionJuvF, IndDailyConsumptionJuvF, IndDailyConsumptionJuvF),
+  chinook_weight_funcs = list(JunJuvChinWt, JulJuvChinWt, AugJuvChinWt)
+)
+
+# Summer calculations for Juvenile Males
+count_SummerJuvM <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "summer",
+  samples_list = adjusted_samples_list,
+  abund_func = SumAbund,
+  cf_func = SummerCF,
+  demo_func = SumJuvDemo,
+  prop = PropJuvM,
+  days_list = c(31, 31, 28),  # June, July, August days
+  ind_cons_funcs = list(IndDailyConsumptionJuvM, IndDailyConsumptionJuvM, IndDailyConsumptionJuvM),
+  chinook_weight_funcs = list(JunJuvChinWt, JulJuvChinWt, AugJuvChinWt)
+)
+
+# Summer calculations for Adult Females
+count_SummerAdF <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "summer",
+  samples_list = adjusted_samples_list,
+  abund_func = SumAbund,
+  cf_func = SummerCF,
+  demo_func = SumFemDemo,
+  prop = 1,  # Assuming full representation for adults
+  days_list = c(31, 31, 28),  # June, July, August days
+  ind_cons_funcs = list(IndDailyConsumptionAdF, IndDailyConsumptionAdF, IndDailyConsumptionAdF),
+  chinook_weight_funcs = list(JunJuvChinWt, JulJuvChinWt, AugJuvChinWt)
+)
+
+# Summer calculations for Adult Males
+count_SummerAdM <- calculate_total_salmon_consumed_multi_month_optimized(
+  season = "summer",
+  samples_list = adjusted_samples_list,
+  abund_func = SumAbund,
+  cf_func = SummerCF,
+  demo_func = SumMaleDemo,
+  prop = 1,  # Assuming full representation for adults
+  days_list = c(31, 31, 28),  # June, July, August days
+  ind_cons_funcs = list(IndDailyConsumptionAdF, IndDailyConsumptionAdF, IndDailyConsumptionAdF),
+  chinook_weight_funcs = list(JunJuvChinWt, JulJuvChinWt, AugJuvChinWt)
+)
+
+count_SummerAdF_df <- count_SummerAdF$raw_samples
+count_SummerAdM_df <- count_SummerAdM$raw_samples
+count_SummerJuvM_df <- count_SummerJuvM$raw_samples
+count_SummerJuvF_df <- count_SummerJuvF$raw_samples
+
+```
+
+```{r summer count age0, cache = TRUE}
+summer_demographic_count <- list(count_SummerAdF_df, count_SummerAdM_df, count_SummerJuvM_df, count_SummerJuvF_df)
+
+# Get the summed results across demographic groups by change_name for Summer
+merged_summer_samples <- sum_consumed_by_change_group(summer_demographic_count)
+
+merged_summer_samples <- as.data.frame(merged_summer_samples)
+# Remove the "summer_" prefix from change_name in the Summer dataframe
+merged_summer_samples$change_name <- sub("^summer_", "", merged_summer_samples$change_name)
+
+merged_summer_samples_sum <- merged_summer_samples %>%
+  group_by(change_name) %>%
+  summarize(
+    ci_min = quantile(total_consumed, probs = 0.025, na.rm = TRUE),
+    ci_low = quantile(total_consumed, probs = 0.25, na.rm = TRUE),
+    avg = quantile(total_consumed, probs = 0.5, na.rm = TRUE),
+    ci_high = quantile(total_consumed, probs = 0.75, na.rm = TRUE),
+    ci_max = quantile(total_consumed, probs = 0.975, na.rm = TRUE)
+  )
+
+# Remove row names from Summer dataframe
+row.names(merged_summer_samples) <- NULL
+
+# Print unique change_name values for Summer
+```
+### Seasonal sensitivity plot count of Age-0 Chinook Salmon 
+
+```{r plot of age0 count by sensitivity changes, cache = TRUE}
+merged_winter_samples_sum$Season <- "Winter"
+merged_spring_samples_sum$Season <- "Spring"
+merged_summer_samples_sum$Season <- "Summer"
+
+age0_count_byseason <- rbind(merged_winter_samples_sum, merged_spring_samples_sum, merged_summer_samples_sum) 
+
+age0_count_df <- age0_count_byseason %>%
+  mutate(Change_Simplified = case_when(
+    grepl("10%_Up", change_name) ~ "10% Increase",
+    grepl("10%_Down", change_name) ~ "10% Decrease",
+    grepl("25%_Up", change_name) ~ "25% Increase",
+    grepl("25%_Down", change_name) ~ "25% Decrease",
+    grepl("50%_Up", change_name) ~ "50% Increase",
+    grepl("50%_Down", change_name) ~ "50% Decrease",
+    grepl("Original_Proportion", change_name) ~ "Original Proportion"
+  ))
+
+age0_count_byseason_changes <- age0_count_df %>%
+  filter(!grepl("Original Proportion", Change_Simplified))
+age0_count_byseason_original <- age0_count_df %>%
+  filter(grepl("Original Proportion", Change_Simplified))
+
+change_plot_age0count <- ggplot(age0_count_byseason_changes, aes(x = Season, y = avg)) +
+  geom_bar(stat = "identity", fill = "gray") +
+  geom_errorbar(aes(ymin = ci_min, ymax = ci_max), width = 0.2, color = "black", linewidth = 0.8) +
+  # Add smaller confidence interval (ci_low and ci_high) - draw this second to bring it to the front, set width to 0 to remove T's
+  geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0, color = "blue", size = 6) +
+  labs(title = "Count of Age-0 Chinook sensitivity test",
+       x = "Season",
+       y = "Total Count of Age-0 Chinook") +
+  theme_minimal() +
+  facet_wrap(~ Change_Simplified, scales = "fixed", ncol = 2)  # Set scales to "fixed" for a uniform y-axis
+change_plot_age0count
+
+
+# Plot only the original proportions
+original_plot_age0count <- ggplot(age0_count_byseason_original, aes(x = Season, y = avg)) +
+  geom_bar(stat = "identity", fill = "gray",color = "black") +
+  # Add larger confidence interval (ci_min and ci_max)
+  geom_errorbar(aes(ymin = ci_min, ymax = ci_max), width = 0.2, color = "black", size = 0.8) +
+  # Add smaller confidence interval (ci_low and ci_high)
+  geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0, color = "sienna3", size = 6) +
+  labs(
+       x = "Season",
+       y = "Total Count of Age-0 Chinook") +
+  theme_minimal()
+
+original_plot_age0count
+
+kable(age0_count_byseason_original)
+
+ggsave("Figures/Figure 7.pdf", original_plot_age0count, units = "in", width = 8, height = 5, dpi = 300)
+
+```
+
+## Overall calculations
+
+```{r combined age0 count data, cache = TRUE}
+combined_df <- merged_winter_samples %>%
+  mutate(season = "Winter") %>%
+  bind_rows(
+    merged_spring_samples %>% mutate(season = "Spring"),
+    merged_summer_samples %>% mutate(season = "Summer")
+  )
+
+# Get unique change names
+unique_change_names <- unique(combined_df$change_name)
+
+# Initialize empty lists to store wide dataframes and summary statistics
+wide_dfs <- list()
+summarized_stats_list <- list()
+
+# Loop through each unique change_name and perform operations
+for (change in unique_change_names) {
+  # Filter combined_df and pivot to wide format
+  change_wide <- combined_df %>%
+    filter(change_name == change) %>%
+    pivot_wider(names_from = season, values_from = total_consumed, values_fn = list) %>%
+    unnest(cols = c(Winter, Spring, Summer))
+  
+  # Calculate total consumed for the year
+  change_wide$total_consumed_yearly <- rowSums(change_wide[, c("Winter", "Spring", "Summer")], na.rm = TRUE)
+  
+  # Store the wide dataframe
+  wide_dfs[[change]] <- change_wide
+  
+  # Calculate summary statistics
+  summarized_stats_list[[change]] <- quantile(
+    change_wide$total_consumed_yearly, 
+    probs = c(0.5, 0.025, 0.975, 0.25, 0.75), 
+    na.rm = TRUE
+  )
+}
+
+# Create a list of change groups to bind together
+change_groups <- c("Change_10%_Up", "Change_10%_Down", "Change_25%_Up", "Change_25%_Down", 
+                   "Change_50%_Up", "Change_50%_Down", "Original_Proportion")
+
+# Bind wide dataframes for each change group with an additional change_name column
+combined_wide_df <- bind_rows(lapply(change_groups, function(change) {
+  wide_dfs[[change]] %>% mutate(change_name = change)
+}))
+
+# Bind summary statistics for each change group
+overall_count_age0_summary <- bind_rows(lapply(change_groups, function(change) {
+  data.frame(change_name = change, t(summarized_stats_list[[change]]))
+}))
+```
+
+### bootstrapping
+
+```{r sensitivity bootstrapping on age-0 count, cache = TRUE}
+age0_count_output <- combined_wide_df %>% select(change_name, total_consumed_yearly)
+
+# Function to perform bootstrapping
+run_bootstrap_analysis <- function(original_dist, change_dist, n_sims = 2000) {
+  # Calculate observed difference
+   dist_1<- log(change_dist)
+   dist_2<- log(original_dist)
+
+  
+  observed_diff <- mean(dist_1) - mean(dist_2)
+  
+  # Combine both distributions
+  combined <- c(dist_1, dist_2)
+  
+  # Initialize a vector to store the resampled differences
+  diffs <- numeric(n_sims)
+  
+  # Bootstrap resampling
+  for (i in 1:n_sims) {
+    shuffled <- sample(combined, length(combined), replace = FALSE)
+    dist_1_resample <- shuffled[1:length(dist_1)]
+    dist_2_resample <- shuffled[(length(dist_1) + 1):(length(combined))]
+    diffs[i] <- mean(dist_1_resample) - mean(dist_2_resample)
+  }
+  
+  # Calculate the p-value
+  p_value <- mean(abs(diffs) >= abs(observed_diff))
+  
+  # Return observed difference and p-value
+  return(c(observed_diff = observed_diff, p_value = p_value))
+}
+
+# Extract the original distribution for "Original_Proportion" from age0_count_output
+original_dist <- age0_count_output %>%
+  filter(change_name == "Original_Proportion") %>%
+  pull(total_consumed_yearly)
+
+# List of changes to compare against the original
+changes_to_compare <- c("Change_10%_Up", "Change_10%_Down", "Change_25%_Up", 
+                        "Change_25%_Down", "Change_50%_Up", "Change_50%_Down")
+
+# Initialize an empty data frame to store results
+age0_count_bootresults <- data.frame(Change_Comparison = character(), Observed_Difference = numeric(), P_Value = numeric(), stringsAsFactors = FALSE)
+
+# Loop through each change and run the bootstrap analysis
+for (change in changes_to_compare) {
+  comparison_dist <- age0_count_output %>%
+    filter(change_name == change) %>%
+    pull(total_consumed_yearly)
+  
+  # Check if the comparison distribution is not empty
+  if (length(comparison_dist) == 0) {
+    cat("No data for", change, "\n")
+  } else {
+    # Run the bootstrap analysis
+    result <- run_bootstrap_analysis(original_dist, comparison_dist)
+    
+    # Add the result to the results dataframe
+    age0_count_bootresults <- rbind(age0_count_bootresults, data.frame(Change_Comparison = change,
+                                         Observed_Difference = result['observed_diff'],
+                                         P_Value = result['p_value']))
+  }
+}
+
+# Print the results
+
+overall_count_age0_summary_table <- overall_count_age0_summary %>%
+  rename("Median" = "X50.", "ci_min" = "X2.5.", "ci_max" = "X97.5.") %>%
+  mutate(
+    Median = paste0(
+      formatC(Median, format = "f", big.mark = ",", digits = 0), 
+      " (", 
+      formatC(ci_min, format = "f", big.mark = ",", digits = 0), 
+      "-", 
+      formatC(ci_max, format = "f", big.mark = ",", digits = 0), 
+      ")"
+    )
+  ) %>%
+  as.data.frame() %>% rename(c("Change_Comparison" = "change_name")) %>% select(Change_Comparison,Median)
+
+kable(overall_count_age0_summary_table)
+
+age0_count_bootresults$inverse_log_values <- exp(age0_count_bootresults$Observed_Difference)
+age0_count_bootresults$percent_change <- (age0_count_bootresults$inverse_log_values-1)*100
+
+age0_count_bootresults$base_age0avg <- overall_count_age0_summary %>%
+  filter(change_name == "Original_Proportion") %>%
+  pull('X50.')
+
+age0_count_bootresults$expected_value <- age0_count_bootresults$base_age0avg * age0_count_bootresults$inverse_log_values
+
+age0_count_bootresults_table <- merge(overall_count_age0_summary_table, age0_count_bootresults, by = "Change_Comparison", all = TRUE)
+
+kable(age0_count_bootresults_table)
+```
+
+```{r count age-0 overall plots, cache = TRUE}
+
+# Rename columns for better clarity
+colnames(overall_count_age0_summary) <- c("Change", "50%", "2.5%", "97.5%", "25%", "75%")
+
+
+
+# Select the median (50%) column for plotting
+plot_data <- overall_count_age0_summary %>%
+  select(Change, `50%`, `2.5%`, `97.5%`, `25%`, `75%`) 
+
+plot_data$Change <- factor(
+  plot_data$Change,
+  levels = c("Original_Proportion", "Change_10%_Down", "Change_10%_Up", "Change_25%_Down", "Change_25%_Up","Change_50%_Down", "Change_50%_Up"),  # Specify the original order
+  labels = c("Base Model", "10% Decrease", "10% Increase", "25% Decrease", "25% Increase","50% Decrease", "50% Increase")  # Specify the new labels
+)
+
+# Create the bar plot with error bars for confidence intervals
+count_plot <-  ggplot(plot_data, aes(x = Change, y = `50%`, fill = Change)) +
+  geom_bar(stat = "identity", color = "black", fill = "grey") +
+  geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`), width = 0.2, color = "black", size = 1) +
+  geom_errorbar(aes(ymin = `25%`, ymax = `75%`), width = 0, color = "sienna3", size = 6) +
+  labs(
+       y = "Count of Age-0 Chinook consumed", 
+       x = "Change Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+count_plot
+
+ggsave("Figures/Figure9.pdf", plot = count_plot, width = 8, height = 5, dpi = 300)
+
+```
+
+# Daily consumption of Chinook salmon per individual Steller sea lion
+
+Alongside looking at the overall consumption by Steller sea lions along the coast of Washington, we also calculated daily rates of the number of age-0 Chinook salmon consumed by an individual Steller sea lion depending on age, sex, and month.
+
+## Daily biomass of age-0 Chinook salmon consumed per SSL demographic {.tabset}
+
+```{r daily biomass consumed by demographic group, cache =TRUE}
+# Helper function to calculate biomass or salmon count
+calculate_consumption <- function(demo_function, chin_weight, age_og, n = 2000) {
+  # Ensure chin_weight and age_og are scalars and applied element-wise across replicates
+  replicates <- replicate(n, demo_function())  # Generate 10,000 replicates
+  replicates_adjusted <- replicates / chin_weight * age_og  # Apply scalar adjustments
+  quantile(replicates_adjusted, probs = c(0.5, 0.025, 0.975))  # Return quantiles
+}
+
+# Loop through demographics and months
+demographics <- list(JuvF = IndDailyConsumptionJuvF, 
+                     JuvM = IndDailyConsumptionJuvM, 
+                     AdF = IndDailyConsumptionAdF, 
+                     AdM = IndDailyConsumptionAdM)
+
+months <- c("Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug")
+weights <- c(DecJuvChinWt(), JanJuvChinWt(), FebJuvChinWt(), MarJuvChinWt(), AprJuvChinWt(),
+             MayJuvChinWt(), JunJuvChinWt(), JulJuvChinWt(), AugJuvChinWt())
+age_og <- list(winter = winter_age0_og, spring = spring_age0_og, summer = summer_age0_og)
+
+# Dataframe to store results
+results_df <- data.frame()
+
+for (demo_name in names(demographics)) {
+  demo_func <- demographics[[demo_name]]
+  
+  for (i in seq_along(months)) {
+    month <- months[i]
+    weight <- weights[i]
+    season <- ifelse(i <= 3, "winter", ifelse(i <= 6, "spring", "summer"))
+    
+    # Biomass calculation
+    biomass <- calculate_consumption(demo_func, 1, age_og[[season]])
+    
+    # Salmon count calculation
+    salmon_count <- calculate_consumption(demo_func, weight, age_og[[season]])
+    
+    # Store the results in a dataframe for both biomass and salmon count
+    quantile_df_biomass <- data.frame(
+      demo_month = paste(demo_name, month, sep = "_"),
+      type = "biomass", 
+      median = biomass[1],
+      ci_lower = biomass[2],
+      ci_upper = biomass[3]
+    )
+    
+    quantile_df_salmon <- data.frame(
+      demo_month = paste(demo_name, month, sep = "_"),
+      type = "salmon_count", 
+      median = salmon_count[1],
+      ci_lower = salmon_count[2],
+      ci_upper = salmon_count[3]
+    )
+    
+    # Append both dataframes to the results_df
+    results_df <- as.data.frame(rbind(results_df, quantile_df_biomass))
+    results_df <- as.data.frame(rbind(results_df, quantile_df_salmon))
+  }
+}
+```
+
+### Summary Graph
+
+```{r plot of daily biomass consumed by demographic group, cache=TRUE}
+
+row.names(results_df) <- NULL
+combined_salmon_count <- results_df %>% filter(type == "salmon_count") %>% select(-type)
+
+combined_salmon_count <- separate(combined_salmon_count, col = demo_month, into = c( 'demo', 'Month'))
+
+# Step 2: Combine `median`, `ci_lower`, and `ci_upper` into one column
+combined_salmon_count_format <- combined_salmon_count %>%
+  mutate(value = paste0(round(median, 1), " (", round(ci_lower, 1), "-", round(ci_upper, 1), ")")) %>%
+  select(demo, Month, value)
+
+# Step 3: Pivot wider to have `demographic` as columns and `month` as rows
+combined_salmon_count_wide <- combined_salmon_count_format %>%
+  pivot_wider(names_from = demo, values_from = value)
+
+combined_salmon_count_wide %>%
+  mutate(across(where(is.character), ~ format(., digits = 1))) %>%
+  kable()
+
+
+
+individual_dailysal_count_df_plot <- combined_salmon_count
+individual_dailysal_count_df_plot$avg <- individual_dailysal_count_df_plot$median
+individual_dailysal_count_df_plot$ci_min <- individual_dailysal_count_df_plot$ci_lower
+individual_dailysal_count_df_plot$ci_max <- individual_dailysal_count_df_plot$ci_upper
+
+
+
+individual_dailysal_count_df_plot$Month <- factor(individual_dailysal_count_df_plot$Month, levels =  c('Dec','Jan', 'Feb', 'Mar', 'Apr', 'May','Jun', 'Jul', 'Aug'), labels = c('December','January', 'February', 'March', 'April', 'May','June', 'July', 'August'))
+
+write.csv(individual_dailysal_count_df_plot, file="code outputs/daily_count_consumed.csv")
+
+p2 <- ggplot(data=individual_dailysal_count_df_plot, aes(x=Month, y=avg, ymin = ci_min, ymax = ci_max, group = demo, fill = demo))+
+  geom_line(aes(colour = demo)) + 
+  geom_point(stat="identity", aes(colour = demo)) +
+  geom_ribbon(aes(ymin = ci_min, ymax = ci_max, color = demo), alpha=0.1, 
+              linetype="dashed") + 
+  expand_limits(y=0)  + 
+  xlab('Month') + 
+  ylab('Daily Age-0 Chinook Consumed per individual SSL')
+
+p2
+```
